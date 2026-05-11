@@ -3,10 +3,88 @@ const fs = require("fs");
 console.log("STARTING SCRAPER");
 
 const visited = new Set();
+const moduleCache = {};
+
+// =====================================
+// Fetch asset index once
+// =====================================
+
+let assetIndex = null;
+
+async function loadAssetIndex() {
+
+  if (assetIndex) {
+    return assetIndex;
+  }
+
+  console.log("Fetching asset index...");
+
+  const res = await fetch(
+    "https://homestuck.com/assets/index-D7c7xGSX.js"
+  );
+
+  if (!res.ok) {
+    throw new Error(
+      `Failed asset index fetch: ${res.status}`
+    );
+  }
+
+  assetIndex = await res.text();
+
+  console.log("Loaded asset index.");
+
+  return assetIndex;
+}
+
+// =====================================
+// Discover page JS module
+// =====================================
+
+async function findModule(pageNum) {
+
+  const padded =
+    String(pageNum).padStart(6, "0");
+
+  // Cached already?
+  if (moduleCache[padded]) {
+    return moduleCache[padded];
+  }
+
+  const indexJs = await loadAssetIndex();
+
+  // Find all matching modules
+  const regex = new RegExp(
+    `${padded}HS-[A-Za-z0-9_-]+\\.js`,
+    "g"
+  );
+
+  const matches = [
+    ...new Set(indexJs.match(regex) || [])
+  ];
+
+  if (matches.length === 0) {
+
+    console.log(
+      `No module found for ${padded}`
+    );
+
+    return null;
+  }
+
+  // Usually only one exists
+  const jsFile = matches[0];
+
+  moduleCache[padded] = jsFile;
+
+  return jsFile;
+}
+
+// =====================================
+// Scrape page
+// =====================================
 
 async function scrapePage(pageNum) {
 
-  // Prevent duplicate pages
   if (visited.has(pageNum)) {
     return;
   }
@@ -19,25 +97,15 @@ async function scrapePage(pageNum) {
   console.log(`\n=== PAGE ${padded} ===`);
 
   // =====================================
-  // TEMP MODULE DATABASE
+  // Find module
   // =====================================
-  //
-  // For now we only know 001901.
-  // Later we'll automate this.
-  //
 
-  const knownModules = {
-    "001901":
-      "001901HS-bLwrJzIw.js"
-  };
-
-  const jsFile =
-    knownModules[padded];
+  const jsFile = await findModule(pageNum);
 
   if (!jsFile) {
 
     console.log(
-      `No module known for ${padded}`
+      `Skipping ${padded}`
     );
 
     return;
@@ -46,7 +114,7 @@ async function scrapePage(pageNum) {
   const jsUrl =
     `https://homestuck.com/assets/${jsFile}`;
 
-  console.log(`Fetching JS: ${jsUrl}`);
+  console.log(`Fetching JS: ${jsFile}`);
 
   // =====================================
   // Fetch story JS
@@ -59,7 +127,6 @@ async function scrapePage(pageNum) {
     throw new Error(
       `Failed JS fetch: ${jsRes.status}`
     );
-
   }
 
   const js = await jsRes.text();
@@ -82,12 +149,12 @@ async function scrapePage(pageNum) {
 
     let src = match[1];
 
-    // Detect flashes
+    // Flash detection
     if (src.endsWith(".swf")) {
       isFlash = true;
     }
 
-    // Keep supported media
+    // Keep media formats
     if (
       src.match(
         /\.(gif|png|jpg|jpeg|swf)$/i
@@ -123,7 +190,7 @@ async function scrapePage(pageNum) {
 
     paragraph = paragraph
       .replace(/\\n/g, "\n")
-      .replace(/\\"/g, "\"")
+      .replace(/\\"/g, '"')
       .replace(/\\\\/g, "\\")
       .trim();
 
@@ -166,7 +233,7 @@ async function scrapePage(pageNum) {
   console.log(`Next page: ${next}`);
 
   // =====================================
-  // Extract next command text
+  // Extract next command
   // =====================================
 
   let nextCommand = null;
@@ -180,14 +247,12 @@ async function scrapePage(pageNum) {
   }
 
   // =====================================
-  // Flash placeholder logic
+  // Flash placeholder
   // =====================================
 
   if (isFlash) {
 
-    console.log(
-      `FLASH DETECTED`
-    );
+    console.log("FLASH DETECTED");
 
     media.length = 0;
 
@@ -232,22 +297,17 @@ async function scrapePage(pageNum) {
     JSON.stringify(result, null, 2)
   );
 
-  console.log(
-    `Saved ${output}`
-  );
+  console.log(`Saved ${output}`);
 
   // =====================================
-  // Recursive scrape
+  // Recurse
   // =====================================
 
   if (next) {
 
-    console.log(
-      `Waiting before next page...`
-    );
-
+    // Delay to avoid hammering server
     await new Promise(r =>
-      setTimeout(r, 250)
+      setTimeout(r, 100)
     );
 
     await scrapePage(next);
@@ -263,5 +323,4 @@ scrapePage(1901).catch(err => {
   console.error(err);
 
   process.exit(1);
-
 });

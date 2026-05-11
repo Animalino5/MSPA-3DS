@@ -1,0 +1,15 @@
+{
+  "page": 2615,
+  "media": [
+    "https://storage.homestuck.com/story/homestuck/media/images/panels/act-2/00715_1.gif",
+    "https://storage.homestuck.com/story/homestuck/media/images/panels/act-2/00715_2.gif"
+  ],
+  "text": [
+    "You activate SCREEN 2.",
+    "The signal is garbled, and you have no idea what you're looking at. Some sort of filthy beggar pleading for help?",
+    "No one is around, And nothing is happening. You seem to be locked out of any sort of interaction with whatever's happening on this monitor."
+  ],
+  "alt": "The screen showing John's session switches off, and a new screen shows ZAZZERPAN THE LEARNED in Rose's house. The screen shows a lock icon.",
+  "command": "WV: Type => SWITCH 3.",
+  "next": 2616
+}

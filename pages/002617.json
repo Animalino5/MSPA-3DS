@@ -1,0 +1,12 @@
+{
+  "page": 2617,
+  "media": [
+    "https://storage.homestuck.com/story/homestuck/media/images/panels/act-2/00717.gif"
+  ],
+  "text": [
+    "All four screens activate. Together they display a countdown, starting at four hours and thirteen minutes."
+  ],
+  "alt": "All four screens turn on, and a countdown begins. 04:13:00... 04:12:59... 04:12:58...",
+  "command": "WV: Type => REBOOT.",
+  "next": 2618
+}

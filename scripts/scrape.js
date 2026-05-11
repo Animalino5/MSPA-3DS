@@ -1,10 +1,12 @@
 const fs = require("fs");
 
+console.log("STARTING SCRAPER");
+
 const visited = new Set();
 
 async function scrapePage(pageNum) {
 
-  // Prevent duplicates
+  // Prevent duplicate pages
   if (visited.has(pageNum)) {
     return;
   }
@@ -14,69 +16,55 @@ async function scrapePage(pageNum) {
   const padded =
     String(pageNum).padStart(6, "0");
 
-  console.log(`Scraping ${padded}...`);
+  console.log(`\n=== PAGE ${padded} ===`);
 
   // =====================================
-  // STEP 1:
-  // Fetch page HTML
+  // TEMP MODULE DATABASE
   // =====================================
+  //
+  // For now we only know 001901.
+  // Later we'll automate this.
+  //
 
-  const pageRes = await fetch(
-    `https://homestuck.com/${padded}`
-  );
+  const knownModules = {
+    "001901":
+      "001901HS-bLwrJzIw.js"
+  };
 
-  if (!pageRes.ok) {
-    throw new Error(
-      `Failed page fetch: ${pageRes.status}`
-    );
-  }
+  const jsFile =
+    knownModules[padded];
 
-  const html = await pageRes.text();
-
-  // =====================================
-  // STEP 2:
-  // Find page JS module
-  // =====================================
-
-  const jsMatch = html.match(
-    new RegExp(
-      `${padded}HS-[A-Za-z0-9_-]+\\.js`
-    )
-  );
-
-  if (!jsMatch) {
+  if (!jsFile) {
 
     console.log(
-      `No JS module found for ${padded}`
+      `No module known for ${padded}`
     );
 
     return;
   }
 
-  const jsFile = jsMatch[0];
-
   const jsUrl =
     `https://homestuck.com/assets/${jsFile}`;
 
-  console.log(`Using ${jsFile}`);
+  console.log(`Fetching JS: ${jsUrl}`);
 
   // =====================================
-  // STEP 3:
   // Fetch story JS
   // =====================================
 
   const jsRes = await fetch(jsUrl);
 
   if (!jsRes.ok) {
+
     throw new Error(
       `Failed JS fetch: ${jsRes.status}`
     );
+
   }
 
   const js = await jsRes.text();
 
   // =====================================
-  // STEP 4:
   // Extract media
   // =====================================
 
@@ -94,14 +82,16 @@ async function scrapePage(pageNum) {
 
     let src = match[1];
 
-    // Detect SWFs
+    // Detect flashes
     if (src.endsWith(".swf")) {
       isFlash = true;
     }
 
-    // Only keep image formats
+    // Keep supported media
     if (
-      src.match(/\.(gif|png|jpg|jpeg|swf)$/i)
+      src.match(
+        /\.(gif|png|jpg|jpeg|swf)$/i
+      )
     ) {
 
       if (!src.startsWith("http")) {
@@ -109,12 +99,13 @@ async function scrapePage(pageNum) {
           "https://homestuck.com/" + src;
       }
 
-      media.push(src);
+      if (!media.includes(src)) {
+        media.push(src);
+      }
     }
   }
 
   // =====================================
-  // STEP 5:
   // Extract paragraphs
   // =====================================
 
@@ -145,7 +136,6 @@ async function scrapePage(pageNum) {
   }
 
   // =====================================
-  // STEP 6:
   // Extract alt text
   // =====================================
 
@@ -160,7 +150,6 @@ async function scrapePage(pageNum) {
   }
 
   // =====================================
-  // STEP 7:
   // Extract next page
   // =====================================
 
@@ -174,8 +163,9 @@ async function scrapePage(pageNum) {
     next = Number(nextMatch[1]);
   }
 
+  console.log(`Next page: ${next}`);
+
   // =====================================
-  // STEP 8:
   // Extract next command text
   // =====================================
 
@@ -190,14 +180,13 @@ async function scrapePage(pageNum) {
   }
 
   // =====================================
-  // STEP 9:
   // Flash placeholder logic
   // =====================================
 
   if (isFlash) {
 
     console.log(
-      `Flash detected on ${padded}`
+      `FLASH DETECTED`
     );
 
     media.length = 0;
@@ -212,13 +201,14 @@ async function scrapePage(pageNum) {
   }
 
   // =====================================
-  // STEP 10:
   // Build JSON
   // =====================================
 
   const result = {
     page: Number(pageNum),
-    type: isFlash ? "flash" : "page",
+    type: isFlash
+      ? "flash"
+      : "page",
     media,
     text,
     alt,
@@ -227,7 +217,6 @@ async function scrapePage(pageNum) {
   };
 
   // =====================================
-  // STEP 11:
   // Save JSON
   // =====================================
 
@@ -235,23 +224,28 @@ async function scrapePage(pageNum) {
     recursive: true
   });
 
+  const output =
+    `pages/${padded}.json`;
+
   fs.writeFileSync(
-    `pages/${padded}.json`,
+    output,
     JSON.stringify(result, null, 2)
   );
 
   console.log(
-    `Saved pages/${padded}.json`
+    `Saved ${output}`
   );
 
   // =====================================
-  // STEP 12:
   // Recursive scrape
   // =====================================
 
   if (next) {
 
-    // Small delay to avoid hammering site
+    console.log(
+      `Waiting before next page...`
+    );
+
     await new Promise(r =>
       setTimeout(r, 250)
     );

@@ -1,0 +1,13 @@
+{
+  "page": 2260,
+  "media": [
+    "https://storage.homestuck.com/story/homestuck/media/images/panels/act-2/00360.gif"
+  ],
+  "text": [
+    "There is nothing to psychoanalyze. Your mother clearly has no real affinity for these damnable things. She only collects them to spite you.",
+    "If anything, she finds them even more repellent than you do. She's just a committed woman."
+  ],
+  "alt": "Rose walks down the stairs and sneers at the various wizard statues.",
+  "command": "Rose: Go downstairs to the kitchen back door.",
+  "next": 2261
+}

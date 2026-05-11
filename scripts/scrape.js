@@ -1,87 +1,88 @@
 const fs = require("fs");
+const { chromium } = require("playwright");
 
-console.log("STARTING SCRAPER");
+console.log("STARTING PLAYWRIGHT SCRAPER");
 
 const visited = new Set();
-const moduleCache = {};
 
 // =====================================
-// Find page JS module
+// Launch browser
 // =====================================
 
-async function findModule(pageNum) {
+async function createBrowser() {
 
-  const padded =
-    String(pageNum).padStart(6, "0");
+  return await chromium.launch({
+    headless: true
+  });
+}
 
-  // Already cached?
-  if (moduleCache[padded]) {
-    return moduleCache[padded];
-  }
+// =====================================
+// Discover module URL
+// =====================================
 
-  console.log(
-    `Fetching HTML for ${padded}`
-  );
+async function discoverModule(page, padded) {
 
-  const res = await fetch(
-    `https://homestuck.com/${padded}`
-  );
+  return new Promise(async (resolve) => {
 
-  if (!res.ok) {
+    let resolved = false;
 
-    throw new Error(
-      `Failed page fetch: ${res.status}`
-    );
-  }
+    // Listen for ALL requests
+    page.on("request", request => {
 
-  const html = await res.text();
+      const url = request.url();
 
-  // Find ALL JS filenames
-  const matches = [
-    ...html.matchAll(
-      /([A-Za-z0-9_-]+\.js)/g
-    )
-  ].map(m => m[1]);
+      // We want:
+      // 001901HS-xxxxx.js
 
-  // We want:
-  // 001901HS-xxxxx.js
+      if (
+        url.includes(`${padded}HS-`) &&
+        url.endsWith(".js")
+      ) {
 
-  const target =
-    `${padded}HS-`;
+        if (!resolved) {
 
-  const jsFile = matches.find(
-    f => f.includes(target)
-  );
+          resolved = true;
 
-  if (!jsFile) {
+          console.log(
+            `Discovered module: ${url}`
+          );
 
-    console.log(
-      `Could not locate module for ${padded}`
-    );
+          resolve(url);
+        }
+      }
+    });
 
-    console.log(
-      "Found JS files:"
+    // Open page
+    await page.goto(
+      `https://homestuck.com/${padded}`,
+      {
+        waitUntil: "networkidle",
+        timeout: 60000
+      }
     );
 
-    console.log(
-      matches.slice(0, 30)
-    );
+    // Safety timeout
+    setTimeout(() => {
 
-    return null;
-  }
+      if (!resolved) {
 
-  moduleCache[padded] = jsFile;
+        console.log(
+          `Module timeout for ${padded}`
+        );
 
-  return jsFile;
+        resolve(null);
+      }
+
+    }, 10000);
+  });
 }
 
 // =====================================
 // Scrape page
 // =====================================
 
-async function scrapePage(pageNum) {
+async function scrapePage(browser, pageNum) {
 
-  // Prevent duplicate recursion
   if (visited.has(pageNum)) {
     return;
   }
@@ -93,47 +94,50 @@ async function scrapePage(pageNum) {
 
   console.log(`\n=== PAGE ${padded} ===`);
 
+  const page =
+    await browser.newPage();
+
   // =====================================
-  // Locate JS module
+  // Discover module
   // =====================================
 
-  const jsFile =
-    await findModule(pageNum);
+  const moduleUrl =
+    await discoverModule(
+      page,
+      padded
+    );
 
-  if (!jsFile) {
+  if (!moduleUrl) {
 
     console.log(
-      `Skipping ${padded}`
+      `Failed to discover module`
     );
+
+    await page.close();
 
     return;
   }
 
-  console.log(
-    `Found module: ${jsFile}`
-  );
-
-  const jsUrl =
-    `https://homestuck.com/assets/${jsFile}`;
-
-  console.log(
-    `Fetching JS...`
-  );
-
   // =====================================
-  // Fetch story JS
+  // Fetch JS directly
   // =====================================
 
-  const jsRes = await fetch(jsUrl);
+  console.log(
+    `Fetching module JS...`
+  );
+
+  const jsRes =
+    await fetch(moduleUrl);
 
   if (!jsRes.ok) {
 
     throw new Error(
-      `Failed JS fetch: ${jsRes.status}`
+      `Module fetch failed: ${jsRes.status}`
     );
   }
 
-  const js = await jsRes.text();
+  const js =
+    await jsRes.text();
 
   // =====================================
   // Extract media
@@ -153,7 +157,6 @@ async function scrapePage(pageNum) {
 
     let src = match[1];
 
-    // Flash detection
     if (
       src.toLowerCase()
         .endsWith(".swf")
@@ -161,7 +164,6 @@ async function scrapePage(pageNum) {
       isFlash = true;
     }
 
-    // Keep supported formats
     if (
       src.match(
         /\.(gif|png|jpg|jpeg|swf)$/i
@@ -180,7 +182,7 @@ async function scrapePage(pageNum) {
   }
 
   // =====================================
-  // Extract paragraphs
+  // Extract text
   // =====================================
 
   const text = [];
@@ -210,7 +212,7 @@ async function scrapePage(pageNum) {
   }
 
   // =====================================
-  // Extract alt text
+  // Extract alt
   // =====================================
 
   let alt = null;
@@ -278,7 +280,7 @@ async function scrapePage(pageNum) {
   }
 
   // =====================================
-  // Build JSON
+  // Save JSON
   // =====================================
 
   const result = {
@@ -292,10 +294,6 @@ async function scrapePage(pageNum) {
     next,
     nextCommand
   };
-
-  // =====================================
-  // Save JSON
-  // =====================================
 
   fs.mkdirSync("pages", {
     recursive: true
@@ -313,18 +311,22 @@ async function scrapePage(pageNum) {
     `Saved ${output}`
   );
 
+  await page.close();
+
   // =====================================
-  // Recursive scrape
+  // Recurse
   // =====================================
 
   if (next) {
 
-    // Delay so we don't hammer site
     await new Promise(r =>
       setTimeout(r, 100)
     );
 
-    await scrapePage(next);
+    await scrapePage(
+      browser,
+      next
+    );
   }
 }
 
@@ -332,7 +334,24 @@ async function scrapePage(pageNum) {
 // START
 // =====================================
 
-scrapePage(1901).catch(err => {
+(async () => {
+
+  const browser =
+    await createBrowser();
+
+  try {
+
+    await scrapePage(
+      browser,
+      1901
+    );
+
+  } finally {
+
+    await browser.close();
+  }
+
+})().catch(err => {
 
   console.error(err);
 

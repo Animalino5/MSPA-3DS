@@ -1,0 +1,12 @@
+{
+  "page": 2345,
+  "type": "page",
+  "media": [
+    "https://homestuck.com/panels/act-2/00445_1.gif",
+    "https://homestuck.com/panels/act-2/00445_2.gif"
+  ],
+  "text": [],
+  "alt": "Dave enters the hallway, confronting the pimped out puppet hanging from the ceiling.",
+  "next": 2346,
+  "nextCommand": "Dave: Hastily enter the room with wild abandon."
+}

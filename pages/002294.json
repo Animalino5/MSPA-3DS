@@ -1,0 +1,16 @@
+{
+  "page": 2294,
+  "type": "page",
+  "media": [
+    "https://homestuck.com/panels/act-2/00394.gif"
+  ],
+  "text": [
+    "You leave through the back door.",
+    "Nearby is the TRANSFORMER which distributes electricity from the UNDERGROUND GENERATOR powered by the river flowing beneath your house.",
+    "The transformer was struck by lightning though, and no longer works. You wonder if your mother has any plans to have it fixed. You guess she'd rather just play her mind games in a dark house like a weirdo.",
+    "You can see the MAUSOLEUM and the PORTABLE GENERATOR across your back yard. You're almost there."
+  ],
+  "alt": "Rose stands outside the back door of her house.",
+  "next": 2295,
+  "nextCommand": "Rose: Use umbrella."
+}

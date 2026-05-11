@@ -1,0 +1,12 @@
+{
+  "page": 2615,
+  "type": "page",
+  "media": [
+    "https://homestuck.com/panels/act-2/00715_1.gif",
+    "https://homestuck.com/panels/act-2/00715_2.gif"
+  ],
+  "text": [],
+  "alt": "The screen showing John's session switches off, and a new screen shows ZAZZERPAN THE LEARNED in Rose's house. The screen shows a lock icon.",
+  "next": 2616,
+  "nextCommand": "WV: Type => SWITCH 3."
+}

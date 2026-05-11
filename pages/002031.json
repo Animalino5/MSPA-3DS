@@ -1,0 +1,14 @@
+{
+  "page": 2031,
+  "type": "page",
+  "media": [
+    "https://homestuck.com/panels/act-1/00131.gif"
+  ],
+  "text": [
+    "You open the package. There is something suspicious inside.",
+    "Something suspiciously dirty and smelly."
+  ],
+  "alt": "John opens the package.",
+  "next": 2032,
+  "nextCommand": "==>"
+}

@@ -14,7 +14,17 @@ jobs:
       contents: write
 
     steps:
+      - name: Configure Git
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
 
+      - name: Commit changes
+        run: |
+          git add .
+          git commit -m "whaa"
+          git push
+          
       # =====================================
       # Checkout repo
       # =====================================

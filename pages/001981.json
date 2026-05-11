@@ -1,0 +1,12 @@
+{
+  "page": 1981,
+  "media": [
+    "https://storage.homestuck.com/story/homestuck/media/images/panels/act-1/00081.gif"
+  ],
+  "text": [
+    "Predictably, the mailbox is empty. You have already been scooped by your father."
+  ],
+  "alt": "John opens the mailbox.",
+  "command": "[S] ==>",
+  "next": 1982
+}

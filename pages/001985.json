@@ -1,0 +1,15 @@
+{
+  "page": 1985,
+  "media": [
+    "https://storage.homestuck.com/story/homestuck/media/images/panels/act-1/00085_1.gif",
+    "https://storage.homestuck.com/story/homestuck/media/images/panels/act-1/00085_2.gif"
+  ],
+  "text": [
+    "The door is locked and your DAD has the CAR KEYS. You peer in through the driver's side window.",
+    "You don't see any mail, but you do see a GREEN PACKAGE. There is also something underneath it that looks like a slip of paper.",
+    "Could these items have come in the mail? You don't see anything else that's usually in the mail, like bills and coupons. Maybe your DAD forgot to take this stuff inside."
+  ],
+  "alt": "John approaches the car.",
+  "command": "John: Spy in the kitchen.",
+  "next": 1986
+}

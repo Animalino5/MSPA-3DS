@@ -1,0 +1,13 @@
+{
+  "page": 2559,
+  "media": [
+    "https://storage.homestuck.com/story/homestuck/media/images/panels/act-2/00659.gif"
+  ],
+  "text": [
+    "You are being ambushed!",
+    "There isn't much room to maneuver on this sloping roof. Maybe you should consider making your way to higher ground."
+  ],
+  "alt": "A giant hand grabs the ground near where John is standing, startling him.",
+  "command": "John: Ascend to the highest point of the house.",
+  "next": 2560
+}

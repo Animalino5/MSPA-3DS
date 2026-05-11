@@ -1,0 +1,13 @@
+{
+  "page": 2625,
+  "media": [
+    "https://storage.homestuck.com/story/homestuck/media/images/panels/act-2/00725.gif"
+  ],
+  "text": [
+    "The door shuts behind you. A panel on the door becomes illuminated.",
+    "As you ponder over the marks on the panel, you hear another mechanical sound overhead."
+  ],
+  "alt": "A door shuts behin WV as they exit. It has a screen on it.",
+  "command": "==>",
+  "next": 2626
+}

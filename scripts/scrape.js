@@ -308,6 +308,17 @@ async function scrapePage(browser, pageNum) {
       setTimeout(r, 100)
     );
 
+    // Stop after Act 2
+
+    if (next > 2659) {
+
+      console.log(
+    "    Reached end target."
+      );
+
+      return;
+    }
+
     await scrapePage(
       browser,
       next

@@ -1,0 +1,14 @@
+{
+  "page": 2134,
+  "media": [
+    "https://storage.homestuck.com/story/homestuck/media/images/panels/act-1/00234retcon.gif",
+    "https://storage.homestuck.com/story/homestuck/media/images/panels/act-1/00234.gif"
+  ],
+  "text": [
+    "The door opens to an exterior walkway, leading to the observatory entrance.",
+    "You've seen less inclement weather before. Oh the things you'll do to help out a friend."
+  ],
+  "alt": "Rose enters an exterior hallway, struck by the rain. John's arm appears from a portal.",
+  "command": "Rose: Hurry up to that observatory.",
+  "next": 2135
+}

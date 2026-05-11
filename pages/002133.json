@@ -1,0 +1,14 @@
+{
+  "page": 2133,
+  "media": [
+    "https://storage.homestuck.com/story/homestuck/media/images/panels/act-1/00233_1_retcon.gif",
+    "https://storage.homestuck.com/story/homestuck/media/images/panels/act-1/00233_1.gif",
+    "https://storage.homestuck.com/story/homestuck/media/images/panels/act-1/00233_2.gif"
+  ],
+  "text": [
+    "This door leads up to the OBSERVATORY. You haven't ventured up there in quite some time."
+  ],
+  "alt": "Rose approaches a door.",
+  "command": "Rose: Go through door.",
+  "next": 2134
+}

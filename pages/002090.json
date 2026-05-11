@@ -1,0 +1,14 @@
+{
+  "page": 2090,
+  "media": [
+    "https://storage.homestuck.com/story/homestuck/media/images/panels/act-1/00190_1.gif",
+    "https://storage.homestuck.com/story/homestuck/media/images/panels/act-1/00190_2.gif"
+  ],
+  "text": [
+    "You snatch the TELESCOPE from its TRIPOD. Who knows, it might be useful. But more importantly, it pushes the CRUXITE to the last card making it available for tinkering.",
+    "The PDA is predictably jettisoned into the yard, over the neighbor's fence."
+  ],
+  "alt": "The telescope is captchalogued, ejecting the PDA.",
+  "command": "John: Put cruxite on weird pattern on alchemiter.",
+  "next": 2091
+}

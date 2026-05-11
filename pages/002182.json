@@ -1,0 +1,13 @@
+{
+  "page": 2182,
+  "media": [
+    "https://storage.homestuck.com/story/homestuck/media/images/panels/act-2/00282.gif"
+  ],
+  "text": [
+    "You find the SACRED URN toppled again. This time you're quite sure it wasn't your fault!",
+    "The SPRITE is nowhere to be found."
+  ],
+  "alt": "John observes the scene in the living room.",
+  "command": "Rose: Remove cruxtruder from doorway.",
+  "next": 2183
+}

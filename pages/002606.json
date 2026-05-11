@@ -1,0 +1,15 @@
+{
+  "page": 2606,
+  "media": [
+    "https://storage.homestuck.com/story/homestuck/media/images/panels/act-2/00706_1.gif",
+    "https://storage.homestuck.com/story/homestuck/media/images/panels/act-2/00706_2.gif"
+  ],
+  "text": [
+    "You have no idea how to turn these on!",
+    "There is no mouse for this weird quadra-monitored computer. It can only be operated through text commands from its keyboard.",
+    "Perhaps there is a special key or command which will allow you to switch to another monitor?"
+  ],
+  "alt": "John is sleeping on the bed.",
+  "command": "WV: Press Tab.",
+  "next": 2607
+}

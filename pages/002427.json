@@ -1,0 +1,15 @@
+{
+  "page": 2427,
+  "media": [
+    "https://storage.homestuck.com/story/homestuck/media/images/panels/act-2/00527_1.gif",
+    "https://storage.homestuck.com/story/homestuck/media/images/panels/act-2/00527_2.gif",
+    "https://storage.homestuck.com/story/homestuck/media/images/panels/act-2/00527_3.gif"
+  ],
+  "text": [
+    "In the interest of due diligence, you enter the other code and repeat the process with that card too.",
+    "Both cards are now punched with different hole patterns."
+  ],
+  "alt": "John picks up the other card and does the same process.",
+  "command": "John: Attempt to retrieve pogo from card.",
+  "next": 2428
+}

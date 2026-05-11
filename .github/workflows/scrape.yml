@@ -4,6 +4,7 @@ on:
   workflow_dispatch:
 
 jobs:
+  timeout-minutes: 360
   scrape:
     runs-on: ubuntu-latest
 

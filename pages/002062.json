@@ -1,0 +1,13 @@
+{
+  "page": 2062,
+  "media": [
+    "https://storage.homestuck.com/story/homestuck/media/images/panels/act-1/00162_1.gif",
+    "https://storage.homestuck.com/story/homestuck/media/images/panels/act-1/00162_2.gif"
+  ],
+  "text": [
+    "It is a clear, sunny day. Nothing out of the ordinary to report. At least, not beyond the walls of your own home."
+  ],
+  "alt": "John looks through the telescope.",
+  "command": "TT: Grab the soiled toilet.",
+  "next": 2063
+}

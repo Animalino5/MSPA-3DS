@@ -1,0 +1,12 @@
+{
+  "page": 2068,
+  "media": [
+    "https://storage.homestuck.com/story/homestuck/media/images/panels/act-1/00168.gif"
+  ],
+  "text": [
+    "It looks like another one of your chums is pestering you on your PDA."
+  ],
+  "alt": "A notification icon appears above the PDA.",
+  "command": "John: Answer chum.",
+  "next": 2069
+}

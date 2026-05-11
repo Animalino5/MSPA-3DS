@@ -1,0 +1,15 @@
+{
+  "page": 1924,
+  "media": [
+    "https://storage.homestuck.com/story/homestuck/media/images/panels/act-1/00024_1.gif",
+    "https://storage.homestuck.com/story/homestuck/media/images/panels/act-1/00024_2.gif"
+  ],
+  "text": [
+    "You pull up to your COMPUTER. This is where you spend most of your time. You decorated your desktop with some rather handsome WALLPAPER which you made yourself. You are really proud of it.",
+    "Your desktop is also littered with various PROGRAMMING PROJECT FILES. You are so bad at programming sometimes you wonder why you even bother with it.",
+    "Your PESTERCHUM application is flashing. Someone is trying to get in touch with you."
+  ],
+  "alt": "John sits at his computer desk.",
+  "command": "John: Open Pesterchum.",
+  "next": 1925
+}

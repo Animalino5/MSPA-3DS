@@ -1,0 +1,13 @@
+{
+  "page": 1929,
+  "media": [
+    "https://storage.homestuck.com/story/homestuck/media/images/panels/act-1/00029.gif"
+  ],
+  "text": [
+    "You are about to hurry down stairs when you hear a car pull into the driveway. It looks like your DAD has returned from the grocery store.",
+    "Oh great. He is beating you to the mail."
+  ],
+  "alt": "A car pulls into the driveway.",
+  "command": "John: Forget it. Check mail later.",
+  "next": 1930
+}

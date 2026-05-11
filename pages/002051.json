@@ -1,0 +1,10 @@
+{
+  "page": 2051,
+  "media": [
+    "https://storage.homestuck.com/story/homestuck/media/images/panels/act-1/00151.gif"
+  ],
+  "text": [],
+  "alt": "You DEPLOY the Totem Lathe in the newly created area of the room. It's a large, strange looking machine.",
+  "command": "John: Examine Totem Lathe.",
+  "next": 2052
+}

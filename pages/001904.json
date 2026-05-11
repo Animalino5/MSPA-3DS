@@ -1,0 +1,13 @@
+{
+  "page": 1904,
+  "media": [
+    "https://storage.homestuck.com/story/homestuck/media/images/panels/act-1/00004.gif"
+  ],
+  "text": [
+    "Your name is JOHN. As was previously mentioned it is your BIRTHDAY. A number of CAKES are scattered about your room. You have a variety of INTERESTS. You have a passion for REALLY TERRIBLE MOVIES. You like to program computers but you are NOT VERY GOOD AT IT. You have a fondness for PARANORMAL LORE, and are an aspiring AMATEUR MAGICIAN. You also like to play GAMES sometimes.",
+    "What will you do?"
+  ],
+  "alt": "It's a wide shot of John's bedroom. The walls are covered in movie posters.",
+  "command": "John: Quickly retrieve arms from drawer.",
+  "next": 1905
+}

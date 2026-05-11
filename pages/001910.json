@@ -1,0 +1,14 @@
+{
+  "page": 1910,
+  "media": [
+    "https://storage.homestuck.com/story/homestuck/media/images/panels/act-1/00010.gif"
+  ],
+  "text": [
+    "Unfortunately, you cannot access the FAKE ARMS! Their card is underneath the one you just used to captchalogue the SMOKE PELLETS. You will have to use the pellets first in order to access the arms. But this is probably unadvisable, since you'd just make your room lousy with smoke!",
+    "Your SYLLADEX'S FETCH MODUS is currently dictated by the logic of a STACK DATA STRUCTURE. You were never all that great with data structures and you find the concept puzzling and mildly irritating.",
+    "But with any hope, perhaps you will advance new, more practical FETCH MODI for your SYLLADEX with a little more experience."
+  ],
+  "alt": "The FAKE ARMS are inaccessible.",
+  "command": "John: Examine Problem Sleuth Poster.",
+  "next": 1911
+}

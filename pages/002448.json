@@ -1,0 +1,13 @@
+{
+  "page": 2448,
+  "media": [
+    "https://storage.homestuck.com/story/homestuck/media/images/panels/act-2/00548_1.gif",
+    "https://storage.homestuck.com/story/homestuck/media/images/panels/act-2/00548_2.gif"
+  ],
+  "text": [
+    "You guess these are all zeros? Or are they capital O's? Zeros would probably make more sense for an empty card, you think."
+  ],
+  "alt": "John picks up the card.",
+  "command": "John: Captchalogue the card.",
+  "next": 2449
+}

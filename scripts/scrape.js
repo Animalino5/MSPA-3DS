@@ -1,376 +1,260 @@
 const fs = require("fs");
+const path = require("path");
 const { chromium } = require("playwright");
-
-console.log("STARTING PLAYWRIGHT SCRAPER");
-
-const visited = new Set();
-
-// =====================================
-// CONFIG
-// =====================================
 
 const START_PAGE = 1901;
 const END_PAGE = 2659;
 
-// =====================================
-// Launch browser
-// =====================================
+const SAVE_EVERY = 10;
 
-async function createBrowser() {
+const OUT_DIR = path.join(__dirname, "..", "pages");
 
-  return await chromium.launch({
-    headless: true
-  });
+if (!fs.existsSync(OUT_DIR)) {
+    fs.mkdirSync(OUT_DIR, { recursive: true });
 }
 
-// =====================================
-// Discover module URL
-// =====================================
-
-async function discoverModule(page, padded) {
-
-  let moduleUrl = null;
-
-  const listener = request => {
-
-    const url = request.url();
-
-    // We want:
-    // 001901HS-xxxxx.js
-
-    if (
-      url.includes(`${padded}HS-`) &&
-      url.endsWith(".js")
-    ) {
-
-      moduleUrl = url;
-
-      console.log(
-        `Discovered module: ${url}`
-      );
-    }
-  };
-
-  // Add listener
-  page.on("request", listener);
-
-  // Open page
-  await page.goto(
-    `https://homestuck.com/${padded}`,
-    {
-      waitUntil: "networkidle",
-      timeout: 60000
-    }
-  );
-
-  // Allow requests to settle
-  await page.waitForTimeout(2000);
-
-  // Remove listener
-  page.off("request", listener);
-
-  return moduleUrl;
+function padPage(num) {
+    return String(num).padStart(6, "0");
 }
 
-// =====================================
-// Scrape page
-// =====================================
+function sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function extractText(js) {
+    const text = [];
+
+    // catches:
+    // t("p",null,"TEXT",-1)
+    // c("p",null,"TEXT",-1)
+    const regex = /["']p["'],null,"((?:\\.|[^"\\])*)"/g;
+
+    let match;
+
+    while ((match = regex.exec(js)) !== null) {
+        let str = match[1];
+
+        str = str
+            .replace(/\\"/g, '"')
+            .replace(/\\n/g, "\n")
+            .replace(/\\\\/g, "\\");
+
+        str = str.trim();
+
+        if (str.length > 0) {
+            text.push(str);
+        }
+    }
+
+    return text;
+}
+
+function extractMedia(js) {
+    const media = [];
+
+    // src:"panels/act-1/00001.gif"
+    const regex = /src:"([^"]+)"/g;
+
+    let match;
+
+    while ((match = regex.exec(js)) !== null) {
+        let url = match[1];
+
+        if (!url.startsWith("http")) {
+            url = "https://homestuck.com/" + url;
+        }
+
+        media.push(url);
+    }
+
+    return media;
+}
+
+function extractAlt(js) {
+    const match = js.match(/alt:"((?:\\.|[^"\\])*)"/);
+
+    if (!match) return "";
+
+    return match[1]
+        .replace(/\\"/g, '"')
+        .replace(/\\n/g, "\n")
+        .replace(/\\\\/g, "\\")
+        .trim();
+}
+
+function extractNext(js) {
+    const match = js.match(/next-page-link":"\/(\d+)"/);
+
+    if (!match) return null;
+
+    return parseInt(match[1]);
+}
+
+function extractCommand(js) {
+    const match = js.match(/link-text":"((?:\\.|[^"\\])*)"/);
+
+    if (!match) return "";
+
+    return match[1]
+        .replace(/\\"/g, '"')
+        .replace(/\\n/g, "\n")
+        .replace(/\\\\/g, "\\")
+        .trim();
+}
+
+function isFlash(media) {
+    return media.some(m =>
+        m.endsWith(".swf") ||
+        m.includes("scratch/")
+    );
+}
+
+async function discoverModule(page, pageNum) {
+    const padded = padPage(pageNum);
+
+    const responses = [];
+
+    page.on("response", async response => {
+        try {
+            const url = response.url();
+
+            if (
+                url.includes("/assets/") &&
+                url.includes(`${padded}HS-`) &&
+                url.endsWith(".js")
+            ) {
+                responses.push(url);
+            }
+        } catch {}
+    });
+
+    await page.goto(`https://homestuck.com/${padded}`, {
+        waitUntil: "networkidle",
+        timeout: 60000
+    });
+
+    await sleep(3000);
+
+    if (responses.length === 0) {
+        return null;
+    }
+
+    return responses[0];
+}
 
 async function scrapePage(browser, pageNum) {
+    const padded = padPage(pageNum);
 
-  // Stop recursion
-  if (pageNum > END_PAGE) {
+    console.log(`\n=== PAGE ${padded} ===`);
 
-    console.log(
-      "Reached end target."
-    );
+    const page = await browser.newPage();
 
-    return;
-  }
+    try {
+        const moduleUrl = await discoverModule(page, pageNum);
 
-  // Prevent duplicate pages
-  if (visited.has(pageNum)) {
-    return;
-  }
+        if (!moduleUrl) {
+            console.log(`Could not locate module for ${padded}`);
 
-  visited.add(pageNum);
+            return null;
+        }
 
-  const padded =
-    String(pageNum).padStart(6, "0");
+        console.log(`Discovered module: ${moduleUrl}`);
 
-  console.log(`\n=== PAGE ${padded} ===`);
+        const js = await page.evaluate(async (url) => {
+            const res = await fetch(url);
+            return await res.text();
+        }, moduleUrl);
 
-  const page =
-    await browser.newPage();
+        const text = extractText(js);
+        const media = extractMedia(js);
+        const alt = extractAlt(js);
+        const next = extractNext(js);
+        const command = extractCommand(js);
 
-  // =====================================
-  // Discover module
-  // =====================================
+        let finalMedia = media;
 
-  const moduleUrl =
-    await discoverModule(
-      page,
-      padded
-    );
+        if (isFlash(media)) {
+            console.log("FLASH DETECTED");
 
-  if (!moduleUrl) {
+            finalMedia = [
+                "https://homestuck.com/panels/act-1/00001.gif"
+            ];
+        }
 
-    console.log(
-      `Failed to discover module`
-    );
+        const data = {
+            page: pageNum,
+            media: finalMedia,
+            text,
+            alt,
+            command,
+            next
+        };
 
-    await page.close();
+        const outPath = path.join(
+            OUT_DIR,
+            `${padded}.json`
+        );
 
-    return;
-  }
+        fs.writeFileSync(
+            outPath,
+            JSON.stringify(data, null, 2)
+        );
 
-  // =====================================
-  // Fetch module JS
-  // =====================================
+        console.log(`Saved ${padded}.json`);
+        console.log(`Text paragraphs: ${text.length}`);
 
-  console.log(
-    `Fetching module JS...`
-  );
-
-  const jsRes =
-    await fetch(moduleUrl);
-
-  if (!jsRes.ok) {
-
-    throw new Error(
-      `Module fetch failed: ${jsRes.status}`
-    );
-  }
-
-  const js =
-    await jsRes.text();
-
-  // =====================================
-  // Extract media
-  // =====================================
-
-  const media = [];
-
-  let isFlash = false;
-
-  const srcMatches = [
-    ...js.matchAll(
-      /src:"([^"]+)"/g
-    )
-  ];
-
-  for (const match of srcMatches) {
-
-    let src = match[1];
-
-    // Flash detection
-    if (
-      src.toLowerCase()
-        .endsWith(".swf")
-    ) {
-      isFlash = true;
+        return next;
+    } catch (err) {
+        console.error(err);
+        return null;
+    } finally {
+        await page.close();
     }
-
-    // Keep supported formats
-    if (
-      src.match(
-        /\.(gif|png|jpg|jpeg|swf)$/i
-      )
-    ) {
-
-      if (!src.startsWith("http")) {
-        src =
-          "https://homestuck.com/" + src;
-      }
-
-      if (!media.includes(src)) {
-        media.push(src);
-      }
-    }
-  }
-
-  // =====================================
-  // Extract paragraphs
-  // =====================================
-
-  const text = [];
-
-  const pMatches = [
-    ...js.matchAll(
-      /t\("p",null,"([\s\S]*?)"/g
-    )
-  ];
-
-  for (const match of pMatches) {
-
-    let paragraph = match[1];
-
-    paragraph = paragraph
-      .replace(/\\n/g, "\n")
-      .replace(/\\"/g, "\"")
-      .replace(/\\\\/g, "\\")
-      .trim();
-
-    if (
-      paragraph.length > 0 &&
-      !text.includes(paragraph)
-    ) {
-      text.push(paragraph);
-    }
-  }
-
-  // =====================================
-  // Extract alt text
-  // =====================================
-
-  let alt = null;
-
-  const altMatch = js.match(
-    /alt:"([^"]+)"/
-  );
-
-  if (altMatch) {
-    alt = altMatch[1];
-  }
-
-  // =====================================
-  // Extract next page
-  // =====================================
-
-  let next = null;
-
-  const nextMatch = js.match(
-    /next-page-link":"\/(\d+)"/
-  );
-
-  if (nextMatch) {
-    next = Number(nextMatch[1]);
-  }
-
-  console.log(
-    `Next page: ${next}`
-  );
-
-  // =====================================
-  // Extract next command
-  // =====================================
-
-  let nextCommand = null;
-
-  const commandMatch = js.match(
-    /"link-text":"([^"]+)"/
-  );
-
-  if (commandMatch) {
-    nextCommand =
-      commandMatch[1];
-  }
-
-  // =====================================
-  // Flash placeholder logic
-  // =====================================
-
-  if (isFlash) {
-
-    console.log(
-      "FLASH DETECTED"
-    );
-
-    media.length = 0;
-
-    media.push(
-      "https://homestuck.com/panels/act-1/00001.gif"
-    );
-
-    text.push(
-      "[FLASH PAGE NOT YET SUPPORTED]"
-    );
-  }
-
-  // =====================================
-  // Build JSON
-  // =====================================
-
-  const result = {
-    page: Number(pageNum),
-    type: isFlash
-      ? "flash"
-      : "page",
-    media,
-    text,
-    alt,
-    next,
-    nextCommand
-  };
-
-  // =====================================
-  // Save JSON
-  // =====================================
-
-  fs.mkdirSync("pages", {
-    recursive: true
-  });
-
-  const output =
-    `pages/${padded}.json`;
-
-  fs.writeFileSync(
-    output,
-    JSON.stringify(result, null, 2)
-  );
-
-  console.log(
-    `Saved ${output}`
-  );
-
-  // =====================================
-  // Cleanup page
-  // =====================================
-
-  await page.close();
-
-  // =====================================
-  // Recursive scrape
-  // =====================================
-
-  if (next) {
-
-    await new Promise(r =>
-      setTimeout(r, 100)
-    );
-
-    await scrapePage(
-      browser,
-      next
-    );
-  }
 }
 
-// =====================================
-// START
-// =====================================
-
 (async () => {
+    console.log("STARTING PLAYWRIGHT SCRAPER");
 
-  const browser =
-    await createBrowser();
+    const browser = await chromium.launch({
+        headless: true
+    });
 
-  try {
+    try {
+        let count = 0;
 
-    await scrapePage(
-      browser,
-      START_PAGE
-    );
+        for (
+            let current = START_PAGE;
+            current <= END_PAGE;
+            current++
+        ) {
+            const padded = padPage(current);
 
-  } finally {
+            const existing = path.join(
+                OUT_DIR,
+                `${padded}.json`
+            );
 
-    await browser.close();
-  }
+            if (fs.existsSync(existing)) {
+                console.log(`Skipping existing ${padded}`);
+                continue;
+            }
 
-})().catch(err => {
+            await scrapePage(browser, current);
 
-  console.error(err);
+            count++;
 
-  process.exit(1);
+            if (count % SAVE_EVERY === 0) {
+                console.log(
+                    `\n=== CHECKPOINT: ${count} pages scraped ===`
+                );
+            }
 
-});
+            // don't hammer the site
+            await sleep(1500);
+        }
+    } finally {
+        await browser.close();
+    }
+
+    console.log("SCRAPE COMPLETE");
+})();

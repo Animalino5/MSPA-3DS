@@ -6,38 +6,7 @@ const visited = new Set();
 const moduleCache = {};
 
 // =====================================
-// Fetch asset index once
-// =====================================
-
-let assetIndex = null;
-
-async function loadAssetIndex() {
-
-  if (assetIndex) {
-    return assetIndex;
-  }
-
-  console.log("Fetching asset index...");
-
-  const res = await fetch(
-    "https://homestuck.com/assets/index-D7c7xGSX.js"
-  );
-
-  if (!res.ok) {
-    throw new Error(
-      `Failed asset index fetch: ${res.status}`
-    );
-  }
-
-  assetIndex = await res.text();
-
-  console.log("Loaded asset index.");
-
-  return assetIndex;
-}
-
-// =====================================
-// Discover page JS module
+// Find page JS module
 // =====================================
 
 async function findModule(pageNum) {
@@ -45,34 +14,61 @@ async function findModule(pageNum) {
   const padded =
     String(pageNum).padStart(6, "0");
 
-  // Cached already?
+  // Already cached?
   if (moduleCache[padded]) {
     return moduleCache[padded];
   }
 
-  const indexJs = await loadAssetIndex();
-
-  // Find all matching modules
-  const regex = new RegExp(
-    `${padded}HS-[A-Za-z0-9_-]+\\.js`,
-    "g"
+  console.log(
+    `Fetching HTML for ${padded}`
   );
 
-  const matches = [
-    ...new Set(indexJs.match(regex) || [])
-  ];
+  const res = await fetch(
+    `https://homestuck.com/${padded}`
+  );
 
-  if (matches.length === 0) {
+  if (!res.ok) {
+
+    throw new Error(
+      `Failed page fetch: ${res.status}`
+    );
+  }
+
+  const html = await res.text();
+
+  // Find ALL JS filenames
+  const matches = [
+    ...html.matchAll(
+      /([A-Za-z0-9_-]+\.js)/g
+    )
+  ].map(m => m[1]);
+
+  // We want:
+  // 001901HS-xxxxx.js
+
+  const target =
+    `${padded}HS-`;
+
+  const jsFile = matches.find(
+    f => f.includes(target)
+  );
+
+  if (!jsFile) {
 
     console.log(
-      `No module found for ${padded}`
+      `Could not locate module for ${padded}`
+    );
+
+    console.log(
+      "Found JS files:"
+    );
+
+    console.log(
+      matches.slice(0, 30)
     );
 
     return null;
   }
-
-  // Usually only one exists
-  const jsFile = matches[0];
 
   moduleCache[padded] = jsFile;
 
@@ -85,6 +81,7 @@ async function findModule(pageNum) {
 
 async function scrapePage(pageNum) {
 
+  // Prevent duplicate recursion
   if (visited.has(pageNum)) {
     return;
   }
@@ -97,10 +94,11 @@ async function scrapePage(pageNum) {
   console.log(`\n=== PAGE ${padded} ===`);
 
   // =====================================
-  // Find module
+  // Locate JS module
   // =====================================
 
-  const jsFile = await findModule(pageNum);
+  const jsFile =
+    await findModule(pageNum);
 
   if (!jsFile) {
 
@@ -111,10 +109,16 @@ async function scrapePage(pageNum) {
     return;
   }
 
+  console.log(
+    `Found module: ${jsFile}`
+  );
+
   const jsUrl =
     `https://homestuck.com/assets/${jsFile}`;
 
-  console.log(`Fetching JS: ${jsFile}`);
+  console.log(
+    `Fetching JS...`
+  );
 
   // =====================================
   // Fetch story JS
@@ -150,11 +154,14 @@ async function scrapePage(pageNum) {
     let src = match[1];
 
     // Flash detection
-    if (src.endsWith(".swf")) {
+    if (
+      src.toLowerCase()
+        .endsWith(".swf")
+    ) {
       isFlash = true;
     }
 
-    // Keep media formats
+    // Keep supported formats
     if (
       src.match(
         /\.(gif|png|jpg|jpeg|swf)$/i
@@ -190,7 +197,7 @@ async function scrapePage(pageNum) {
 
     paragraph = paragraph
       .replace(/\\n/g, "\n")
-      .replace(/\\"/g, '"')
+      .replace(/\\"/g, "\"")
       .replace(/\\\\/g, "\\")
       .trim();
 
@@ -230,7 +237,9 @@ async function scrapePage(pageNum) {
     next = Number(nextMatch[1]);
   }
 
-  console.log(`Next page: ${next}`);
+  console.log(
+    `Next page: ${next}`
+  );
 
   // =====================================
   // Extract next command
@@ -243,7 +252,8 @@ async function scrapePage(pageNum) {
   );
 
   if (commandMatch) {
-    nextCommand = commandMatch[1];
+    nextCommand =
+      commandMatch[1];
   }
 
   // =====================================
@@ -252,7 +262,9 @@ async function scrapePage(pageNum) {
 
   if (isFlash) {
 
-    console.log("FLASH DETECTED");
+    console.log(
+      "FLASH DETECTED"
+    );
 
     media.length = 0;
 
@@ -297,15 +309,17 @@ async function scrapePage(pageNum) {
     JSON.stringify(result, null, 2)
   );
 
-  console.log(`Saved ${output}`);
+  console.log(
+    `Saved ${output}`
+  );
 
   // =====================================
-  // Recurse
+  // Recursive scrape
   // =====================================
 
   if (next) {
 
-    // Delay to avoid hammering server
+    // Delay so we don't hammer site
     await new Promise(r =>
       setTimeout(r, 100)
     );
@@ -323,4 +337,5 @@ scrapePage(1901).catch(err => {
   console.error(err);
 
   process.exit(1);
+
 });

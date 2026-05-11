@@ -6,6 +6,13 @@ console.log("STARTING PLAYWRIGHT SCRAPER");
 const visited = new Set();
 
 // =====================================
+// CONFIG
+// =====================================
+
+const START_PAGE = 1901;
+const END_PAGE = 2659;
+
+// =====================================
 // Launch browser
 // =====================================
 
@@ -27,6 +34,9 @@ async function discoverModule(page, padded) {
   const listener = request => {
 
     const url = request.url();
+
+    // We want:
+    // 001901HS-xxxxx.js
 
     if (
       url.includes(`${padded}HS-`) &&
@@ -53,7 +63,7 @@ async function discoverModule(page, padded) {
     }
   );
 
-  // Give requests a second to settle
+  // Allow requests to settle
   await page.waitForTimeout(2000);
 
   // Remove listener
@@ -68,6 +78,17 @@ async function discoverModule(page, padded) {
 
 async function scrapePage(browser, pageNum) {
 
+  // Stop recursion
+  if (pageNum > END_PAGE) {
+
+    console.log(
+      "Reached end target."
+    );
+
+    return;
+  }
+
+  // Prevent duplicate pages
   if (visited.has(pageNum)) {
     return;
   }
@@ -104,7 +125,7 @@ async function scrapePage(browser, pageNum) {
   }
 
   // =====================================
-  // Fetch JS directly
+  // Fetch module JS
   // =====================================
 
   console.log(
@@ -142,6 +163,7 @@ async function scrapePage(browser, pageNum) {
 
     let src = match[1];
 
+    // Flash detection
     if (
       src.toLowerCase()
         .endsWith(".swf")
@@ -149,6 +171,7 @@ async function scrapePage(browser, pageNum) {
       isFlash = true;
     }
 
+    // Keep supported formats
     if (
       src.match(
         /\.(gif|png|jpg|jpeg|swf)$/i
@@ -167,7 +190,7 @@ async function scrapePage(browser, pageNum) {
   }
 
   // =====================================
-  // Extract text
+  // Extract paragraphs
   // =====================================
 
   const text = [];
@@ -197,7 +220,7 @@ async function scrapePage(browser, pageNum) {
   }
 
   // =====================================
-  // Extract alt
+  // Extract alt text
   // =====================================
 
   let alt = null;
@@ -244,7 +267,7 @@ async function scrapePage(browser, pageNum) {
   }
 
   // =====================================
-  // Flash placeholder
+  // Flash placeholder logic
   // =====================================
 
   if (isFlash) {
@@ -265,7 +288,7 @@ async function scrapePage(browser, pageNum) {
   }
 
   // =====================================
-  // Save JSON
+  // Build JSON
   // =====================================
 
   const result = {
@@ -279,6 +302,10 @@ async function scrapePage(browser, pageNum) {
     next,
     nextCommand
   };
+
+  // =====================================
+  // Save JSON
+  // =====================================
 
   fs.mkdirSync("pages", {
     recursive: true
@@ -296,32 +323,27 @@ async function scrapePage(browser, pageNum) {
     `Saved ${output}`
   );
 
+  // =====================================
+  // Cleanup page
+  // =====================================
+
   await page.close();
 
   // =====================================
-// Recurse
-// =====================================
+  // Recursive scrape
+  // =====================================
 
-if (next) {
+  if (next) {
 
-  // Stop after Act 2
-  if (next > 2659) {
-
-    console.log(
-      "Reached end target."
+    await new Promise(r =>
+      setTimeout(r, 100)
     );
 
-    return;
+    await scrapePage(
+      browser,
+      next
+    );
   }
-
-  await new Promise(r =>
-    setTimeout(r, 100)
-  );
-
-  await scrapePage(
-    browser,
-    next
-  );
 }
 
 // =====================================
@@ -337,7 +359,7 @@ if (next) {
 
     await scrapePage(
       browser,
-      1901
+      START_PAGE
     );
 
   } finally {

@@ -1,0 +1,15 @@
+{
+  "page": 2006,
+  "media": [
+    "https://storage.homestuck.com/story/homestuck/media/images/panels/act-1/00106_1.gif",
+    "https://storage.homestuck.com/story/homestuck/media/images/panels/act-1/00106_2.gif",
+    "https://storage.homestuck.com/story/homestuck/media/images/panels/act-1/00106_3.gif"
+  ],
+  "text": [
+    "You take the RAZOR and use it to perform surgery on the CAKE.",
+    "You take the TOWEL and clean off the extracted goods."
+  ],
+  "alt": "You use the RAZOR to remove the other objects from your cake abomination.",
+  "command": "John: Retrieve your items.",
+  "next": 2007
+}

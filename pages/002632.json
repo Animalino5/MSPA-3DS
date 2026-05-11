@@ -1,0 +1,13 @@
+{
+  "page": 2632,
+  "media": [
+    "https://storage.homestuck.com/story/homestuck/media/images/panels/act-2/00732.gif"
+  ],
+  "text": [
+    "You go through the door to find another room. It's the same size as the other one you just wasted all that time in, while a clock was ticking down to something which may or may not be your doom. Maybe there is something in here that will help you escape.",
+    "Against the wall there is another perplexing contraption."
+  ],
+  "alt": "WV steps into the room.",
+  "command": "==>",
+  "next": 2633
+}

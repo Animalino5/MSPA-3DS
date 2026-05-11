@@ -1,0 +1,14 @@
+{
+  "page": 1914,
+  "media": [
+    "https://storage.homestuck.com/story/homestuck/media/images/panels/act-1/00014.gif"
+  ],
+  "text": [
+    "You first place the HAMMER into your SYLLADEX.",
+    "But now all of your CAPTCHALOGUE CARDS are full. You wonder what will happen if you try to take the NAILS?",
+    "You guess it doesn't hurt to try."
+  ],
+  "alt": "You captchalogue the HAMMER.",
+  "command": "John: Take nails.",
+  "next": 1915
+}

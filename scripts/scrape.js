@@ -21,6 +21,25 @@ function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+const { execSync } = require("child_process");
+
+function commitProgress(lastPage) {
+    try {
+        execSync("git add pages", { stdio: "inherit" });
+
+        execSync(
+            `git commit -m "Scraped through ${padPage(lastPage)}"`,
+            { stdio: "inherit" }
+        );
+
+        execSync("git push", { stdio: "inherit" });
+
+        console.log(`Pushed progress through ${padPage(lastPage)}`);
+    } catch (err) {
+        console.log("Nothing to commit.");
+    }
+}
+
 function extractText(js) {
     const text = [];
 
@@ -61,7 +80,9 @@ function extractMedia(js) {
         let url = match[1];
 
         if (!url.startsWith("http")) {
-            url = "https://homestuck.com/" + url;
+            url =
+                "https://storage.homestuck.com/story/homestuck/media/images/" +
+                url;
         }
 
         media.push(url);
@@ -177,7 +198,7 @@ async function scrapePage(browser, pageNum) {
             console.log("FLASH DETECTED");
 
             finalMedia = [
-                "https://homestuck.com/panels/act-1/00001.gif"
+                "https://storage.homestuck.com/story/homestuck/media/images/panels/act-1/00001.gif"
             ];
         }
 
@@ -244,10 +265,12 @@ async function scrapePage(browser, pageNum) {
             count++;
 
             if (count % SAVE_EVERY === 0) {
-                console.log(
-                    `\n=== CHECKPOINT: ${count} pages scraped ===`
-                );
-            }
+            console.log(
+                `\n=== COMMITTING AFTER ${count} PAGES ===`
+            );
+
+            commitProgress(current);
+        }
 
             // don't hammer the site
             await sleep(1500);

@@ -1,0 +1,12 @@
+{
+  "page": 2588,
+  "media": [
+    "https://storage.homestuck.com/story/homestuck/media/images/panels/act-2/00688.gif"
+  ],
+  "text": [
+    "Over here is the other side of the room. There is another one of those purple storage boxes, and some useless objects scattered on the floor."
+  ],
+  "alt": "There are items laying on the floor: a box of crayons, a jug of oil, a glowing green rock, and a small chunk of amber with a firefly trapped inside.",
+  "command": "WV: Use glowing green rock to open cans.",
+  "next": 2589
+}

@@ -1,0 +1,12 @@
+{
+  "page": 1999,
+  "media": [
+    "https://storage.homestuck.com/story/homestuck/media/images/panels/act-1/00099.gif"
+  ],
+  "text": [
+    "This RED PACKAGE is addressed to you."
+  ],
+  "alt": "You captchalogue the RED PACKAGE from the table.",
+  "command": "John: Take envelope.",
+  "next": 2000
+}

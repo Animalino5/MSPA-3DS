@@ -1,0 +1,14 @@
+{
+  "page": 2250,
+  "media": [
+    "https://storage.homestuck.com/story/homestuck/media/images/panels/act-2/00350_1.gif",
+    "https://storage.homestuck.com/story/homestuck/media/images/panels/act-2/00350_2.gif"
+  ],
+  "text": [
+    "In the breeze of the FAN, the betas jostle near the OPEN WINDOW.",
+    "This arrangement is a little disconcerting. If they fell out, it sure would be a stupid way to lose them."
+  ],
+  "alt": "The beta is hanging near the bedroom window and jostling.",
+  "command": "Dave: Turn off the fan.",
+  "next": 2251
+}

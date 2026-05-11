@@ -1,0 +1,13 @@
+{
+  "page": 2245,
+  "media": [
+    "https://storage.homestuck.com/story/homestuck/media/images/panels/act-2/00345.gif"
+  ],
+  "text": [
+    "You enter the bathroom. There's a damp towel on the floor you can probably use for this crisis.",
+    "You stop to pay a little respect to one of your BRO'S boys up there. Hey lil' man. How's it hangin'?"
+  ],
+  "alt": "Dave enters the bathroom. Another puppet hangs from the ceiling in a particularly cool outfit. A damp towel lays on the floor.",
+  "command": "Dave: Captchalogue damp towel.",
+  "next": 2246
+}

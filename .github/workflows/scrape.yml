@@ -12,7 +12,11 @@ jobs:
       contents: write
 
     steps:
-
+      - name: Install Playwright
+        run: |
+          npm install playwright
+          npx playwright install chromium
+    
       - name: Checkout repo
         uses: actions/checkout@v4
 

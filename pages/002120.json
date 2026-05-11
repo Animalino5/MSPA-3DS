@@ -1,0 +1,13 @@
+{
+  "page": 2120,
+  "media": [
+    "https://storage.homestuck.com/story/homestuck/media/images/panels/act-1/00220.gif"
+  ],
+  "text": [
+    "You would only resort to such an embarrassing activity while no one was watching!!!",
+    "These journals are for your eyes only."
+  ],
+  "alt": "Rose uses her foot to nudge a journal under the bed.",
+  "command": "Rose: Get violin.",
+  "next": 2121
+}

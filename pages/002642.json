@@ -1,0 +1,13 @@
+{
+  "page": 2642,
+  "media": [
+    "https://storage.homestuck.com/story/homestuck/media/images/panels/act-2/00742.gif"
+  ],
+  "text": [
+    "You push the button. All of the numbers change.",
+    "Perhaps these are the coordinates for the location of the center of this facility, along with the local date and time? If this is the case, it would make a useful reference point for your current bearings."
+  ],
+  "alt": "WV presses it. The numbers all change.",
+  "command": "WV: Fiddle with the dials.",
+  "next": 2643
+}

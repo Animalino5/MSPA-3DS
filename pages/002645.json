@@ -1,0 +1,13 @@
+{
+  "page": 2645,
+  "media": [
+    "https://storage.homestuck.com/story/homestuck/media/images/panels/act-2/00745.gif"
+  ],
+  "text": [
+    "You nudge the numbers a bit more and appearify a bunch of cans. This is so much more efficient than walking back to the other room to get them.",
+    "You are to believe that time is at a premium, after all."
+  ],
+  "alt": "The cans are all appearified.",
+  "command": "WV: Deappearify the pumpkin.",
+  "next": 2646
+}

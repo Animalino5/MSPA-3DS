@@ -22,59 +22,44 @@ async function createBrowser() {
 
 async function discoverModule(page, padded) {
 
-  return new Promise(async (resolve) => {
+  let moduleUrl = null;
 
-    let resolved = false;
+  const listener = request => {
 
-    // Listen for ALL requests
-    page.on("request", request => {
+    const url = request.url();
 
-      const url = request.url();
+    if (
+      url.includes(`${padded}HS-`) &&
+      url.endsWith(".js")
+    ) {
 
-      // We want:
-      // 001901HS-xxxxx.js
+      moduleUrl = url;
 
-      if (
-        url.includes(`${padded}HS-`) &&
-        url.endsWith(".js")
-      ) {
+      console.log(
+        `Discovered module: ${url}`
+      );
+    }
+  };
 
-        if (!resolved) {
+  // Add listener
+  page.on("request", listener);
 
-          resolved = true;
+  // Open page
+  await page.goto(
+    `https://homestuck.com/${padded}`,
+    {
+      waitUntil: "networkidle",
+      timeout: 60000
+    }
+  );
 
-          console.log(
-            `Discovered module: ${url}`
-          );
+  // Give requests a second to settle
+  await page.waitForTimeout(2000);
 
-          resolve(url);
-        }
-      }
-    });
+  // Remove listener
+  page.off("request", listener);
 
-    // Open page
-    await page.goto(
-      `https://homestuck.com/${padded}`,
-      {
-        waitUntil: "networkidle",
-        timeout: 60000
-      }
-    );
-
-    // Safety timeout
-    setTimeout(() => {
-
-      if (!resolved) {
-
-        console.log(
-          `Module timeout for ${padded}`
-        );
-
-        resolve(null);
-      }
-
-    }, 10000);
-  });
+  return moduleUrl;
 }
 
 // =====================================

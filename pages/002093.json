@@ -1,0 +1,14 @@
+{
+  "page": 2093,
+  "media": [
+    "https://storage.homestuck.com/story/homestuck/media/images/panels/act-1/00193.gif"
+  ],
+  "text": [
+    "You set the ALCHEMITER to cast THREE (3) PERFECTLY GENERIC OBJECTS for some reason, expending a total of 6 units of BUILD GRIST.",
+    "These things look completely useless. What a waste!",
+    "Out of the corner of your eye, you notice there's something in the sky."
+  ],
+  "alt": "You set a counter interface to three, which seems to cost six build grist. The pattern on the large ALCHEMITER glows, and three green cubes appear.",
+  "command": "John: Switch modus and use telescope to inspect sky.",
+  "next": 2094
+}

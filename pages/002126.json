@@ -1,0 +1,15 @@
+{
+  "page": 2126,
+  "media": [
+    "https://storage.homestuck.com/story/homestuck/media/images/panels/act-1/00226.gif"
+  ],
+  "text": [
+    "You take your LAPTOP and prepare to make the journey through the house.",
+    "L < V. L > K.",
+    "This causes the tree to be unbalanced, so your SYLLADEX auto-balances itself. Now the LAPTOP occupies the ROOT CARD, while the other two items comprise the LEAVES.",
+    "K < L. V > L."
+  ],
+  "alt": "You captchalogue the LAPTOP, and its card is pushed above the other two cards.",
+  "command": "Rose: Examine book on desk.",
+  "next": 2127
+}

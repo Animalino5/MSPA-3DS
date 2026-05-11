@@ -1,0 +1,12 @@
+{
+  "page": 2130,
+  "media": [
+    "https://storage.homestuck.com/story/homestuck/media/images/panels/act-1/00230.gif"
+  ],
+  "text": [
+    "You approach a juncture in the hallway. Beyond the juncture is the OBSERVATORY."
+  ],
+  "alt": "Rose walk through the hallway.",
+  "command": "==>",
+  "next": 2131
+}

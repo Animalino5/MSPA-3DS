@@ -1,0 +1,13 @@
+{
+  "page": 2016,
+  "media": [
+    "https://storage.homestuck.com/story/homestuck/media/images/panels/act-1/00116.gif"
+  ],
+  "text": [
+    "You're not sure you really want to dig into this huge tome. It looks really boring. And kind of ornery.",
+    "Maybe you'll just check out that free modus instead."
+  ],
+  "alt": "DATA STRUCTURES for ASSHOLES, By Buckminster Funnyuncle. There's a quote: 'I think my rage just crapped its pants'... attributed to Funnyuncle. A disgusted emoji speaks: 'Your ignorance just made me throw up a little. Get a clue, you computer-illiterate piece of shit.' A sticker reads: 'FREE FETCH MODUS IN BACK!!!'",
+  "command": "John: Get free Fetch Modus.",
+  "next": 2017
+}

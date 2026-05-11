@@ -1,0 +1,13 @@
+{
+  "page": 2011,
+  "media": [
+    "https://storage.homestuck.com/story/homestuck/media/images/panels/act-1/00111.gif"
+  ],
+  "text": [
+    "You decide to space out on the computer for a while before doing anything important.",
+    "You open the TYPHEUS web browser and direct it to what is indisputably the most amazing website ever created."
+  ],
+  "alt": "You open mspaintadventures.com on the browser.",
+  "command": "==>",
+  "next": 2012
+}

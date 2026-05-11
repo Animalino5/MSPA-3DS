@@ -1,0 +1,14 @@
+{
+  "page": 2015,
+  "media": [
+    "https://storage.homestuck.com/story/homestuck/media/images/panels/act-1/00115_1.gif",
+    "https://storage.homestuck.com/story/homestuck/media/images/panels/act-1/00115_2_retcon.gif",
+    "https://storage.homestuck.com/story/homestuck/media/images/panels/act-1/00115_2.gif"
+  ],
+  "text": [
+    "You go to your CLOSET, where you keep a lot of clothes and an array of handy COMPUTER PROGRAMMING GUIDES."
+  ],
+  "alt": "John approaches his bookshelf.",
+  "command": "John: Read Data Structures book.",
+  "next": 2016
+}

@@ -1,0 +1,15 @@
+{
+  "page": 2020,
+  "media": [
+    "https://storage.homestuck.com/story/homestuck/media/images/panels/act-1/00120.gif"
+  ],
+  "text": [
+    "Put it...",
+    "Down?",
+    "...",
+    "You're not quite sure you understand."
+  ],
+  "alt": "John looks down at the razor in his hand, confused.",
+  "command": "John: Pick up two items.",
+  "next": 2021
+}

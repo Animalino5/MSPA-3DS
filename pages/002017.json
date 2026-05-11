@@ -1,0 +1,12 @@
+{
+  "page": 2017,
+  "media": [
+    "https://storage.homestuck.com/story/homestuck/media/images/panels/act-1/00117.gif"
+  ],
+  "text": [
+    "You turn to the back inside cover, where a free FETCH MODUS is included in a plastic sleeve."
+  ],
+  "alt": "A FETCH MODUS labelled 'queue' sits inside the book's plastic sleeve.",
+  "command": "John: Apply Fetch Modus to Sylladex.",
+  "next": 2018
+}

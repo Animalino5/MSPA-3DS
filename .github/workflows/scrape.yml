@@ -5,28 +5,52 @@ on:
 
 jobs:
   scrape:
+
     runs-on: ubuntu-latest
+
     timeout-minutes: 360
 
     permissions:
       contents: write
 
     steps:
-      - name: Install Playwright
-        run: |
-          npm install playwright
-          npx playwright install chromium
-    
+
+      # =====================================
+      # Checkout repo
+      # =====================================
+
       - name: Checkout repo
         uses: actions/checkout@v4
+
+      # =====================================
+      # Setup Node
+      # =====================================
 
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: 20
 
+      # =====================================
+      # Install Playwright
+      # =====================================
+
+      - name: Install Playwright
+        run: |
+          npm init -y
+          npm install playwright
+          npx playwright install chromium
+
+      # =====================================
+      # Run scraper
+      # =====================================
+
       - name: Run scraper
         run: node scripts/scrape.js
+
+      # =====================================
+      # Commit JSON
+      # =====================================
 
       - name: Commit JSON
         run: |
@@ -35,6 +59,6 @@ jobs:
 
           git add pages/
 
-          git commit -m "Add scraped page" || echo "No changes"
+          git commit -m "Update scraped pages" || echo "No changes"
 
           git push

@@ -1,0 +1,13 @@
+{
+  "page": 2206,
+  "media": [
+    "https://storage.homestuck.com/story/homestuck/media/images/panels/act-2/00306.gif"
+  ],
+  "text": [
+    "You re-captchalogue everything the way you want it to appear in the tree, and head downstairs.",
+    "You figure that's enough dilly-dallying. Time to get a move on!"
+  ],
+  "alt": "The laptop is back in the root card of the sylladex.",
+  "command": "[S] ==>",
+  "next": 2207
+}

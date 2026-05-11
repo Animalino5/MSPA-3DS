@@ -1,0 +1,14 @@
+{
+  "page": 2043,
+  "media": [
+    "https://storage.homestuck.com/story/homestuck/media/images/panels/act-1/00143_1.gif",
+    "https://storage.homestuck.com/story/homestuck/media/images/panels/act-1/00143_2.gif"
+  ],
+  "text": [
+    "It looks like your DAD is leaving again for more baking supplies. You're relieved to have the house to yourself again, if only for a few minutes.",
+    "You just hope he doesn't notice the MAGIC CHEST on the roof. Or all the shit you threw out the window, for that matter."
+  ],
+  "alt": "John looks out the window.",
+  "command": "TT: Select stuff in yard and move it back into room.",
+  "next": 2044
+}

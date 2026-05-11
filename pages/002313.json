@@ -1,0 +1,14 @@
+{
+  "page": 2313,
+  "media": [
+    "https://storage.homestuck.com/story/homestuck/media/images/panels/act-2/00413_1.gif",
+    "https://storage.homestuck.com/story/homestuck/media/images/panels/act-2/00413_2.gif"
+  ],
+  "text": [
+    "You fire up the GENERATOR and drag a cord into the MAUSOLEUM.",
+    "It of course would be foolish to run the GENERATOR inside a confined space. GENERATOR SAFETY is everyone's business."
+  ],
+  "alt": "The generator begins whirring. A cord extends from it to the inside of the mausoleum.",
+  "command": "Rose: Defile tomb.",
+  "next": 2314
+}

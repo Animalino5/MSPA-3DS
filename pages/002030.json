@@ -1,0 +1,12 @@
+{
+  "page": 2030,
+  "media": [
+    "https://storage.homestuck.com/story/homestuck/media/images/panels/act-1/00130.gif"
+  ],
+  "text": [
+    "You should probably go get that stuff before you forget."
+  ],
+  "alt": "Everything else has been launched even farther than the PDA. Cake skid marks cover the street.",
+  "command": "John: Use the razor on the red package.",
+  "next": 2031
+}

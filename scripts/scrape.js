@@ -299,31 +299,29 @@ async function scrapePage(browser, pageNum) {
   await page.close();
 
   // =====================================
-  // Recurse
-  // =====================================
+// Recurse
+// =====================================
 
-  if (next) {
+if (next) {
 
-    await new Promise(r =>
-      setTimeout(r, 100)
+  // Stop after Act 2
+  if (next > 2659) {
+
+    console.log(
+      "Reached end target."
     );
 
-    // Stop after Act 2
-
-    if (next > 2659) {
-
-      console.log(
-    "    Reached end target."
-      );
-
-      return;
-    }
-
-    await scrapePage(
-      browser,
-      next
-    );
+    return;
   }
+
+  await new Promise(r =>
+    setTimeout(r, 100)
+  );
+
+  await scrapePage(
+    browser,
+    next
+  );
 }
 
 // =====================================

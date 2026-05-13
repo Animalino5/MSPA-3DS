@@ -1,8 +1,8 @@
 #include <3ds.h>
 #include <citro2d.h>
 #include <malloc.h>
+#include <stdlib.h> 
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
 #include <sys/stat.h>
@@ -485,9 +485,9 @@ static void render_top(void) {
 #define BOT_PAD_X     10
 #define BOT_PAD_TOP    6
 #define BOT_LINE_H    18   /* px per text line                        */
-#define BOT_TITLE_SZ  0.60f
-#define BOT_BODY_SZ   0.45f
-#define BOT_CMD_SZ    0.52f
+#define BOT_TITLE_SZ  0.80f
+#define BOT_BODY_SZ   0.50f
+#define BOT_CMD_SZ    0.72f
 
 /* colours */
 #define COL_BG        C2D_Color32(0xE8,0xE8,0xE8,0xFF)
@@ -632,9 +632,6 @@ static void render_bottom(void) {
     /* white card */
     C2D_DrawRectSolid(SIDEBAR_W, 0, 0.1f, BOT_W - SIDEBAR_W * 2, BOT_H, COL_WHITE);
 
-    /* divider */
-    C2D_DrawRectSolid(SIDEBAR_W, DIV_Y, 0.2f, BOT_W - SIDEBAR_W * 2, 2, COL_DIV);
-
     const float TITLE_SZ = 0.60f;
     const float BODY_SZ  = 0.45f;
     const float CMD_SZ   = 0.52f;
@@ -649,7 +646,8 @@ static void render_bottom(void) {
             draw_text("> B: CONTINUE", TEXT_X_START, BODY_Y_START + LINE_H * 4, 0.3f, BODY_SZ, COL_BLACK);
         else
             draw_text("> B: NO SAVE", TEXT_X_START, BODY_Y_START + LINE_H * 4, 0.3f, BODY_SZ, COL_GREY);
-        draw_text("> START: Quit", TEXT_X_START, BODY_Y_START + LINE_H * 6, 0.3f, BODY_SZ, COL_GREY);
+	draw_text("> X: TELEPORT TO PAGE", TEXT_X_START, BODY_Y_START + LINE_H * 5, 0.3f, BODY_SZ, COL_BLACK);
+        draw_text("> START: Quit", TEXT_X_START, BODY_Y_START + LINE_H * 7, 0.3f, BODY_SZ, COL_GREY);
         break;
 
     case STATE_LOADING: {
@@ -658,7 +656,7 @@ static void render_bottom(void) {
         snprintf(tmp, sizeof(tmp), "Page %06d", loadJob.targetPage);
         draw_text(tmp, TEXT_X_START, BODY_Y_START + LINE_H * 1, 0.3f, BODY_SZ, COL_BLACK);
         if (loadJob.stage == LOAD_GIF_CONVERT_FRAME && loadJob.converter.frameCount > 0) {
-            snprintf(tmp, sizeof(tmp), "frame %u / %u",
+            snprintf(tmp, sizeof(tmp), "frame %lu / %lu",
                      loadJob.converter.frameDone + 1,
                      loadJob.converter.frameCount);
         } else {
@@ -670,32 +668,82 @@ static void render_bottom(void) {
     }
 
     case STATE_READING: {
-        const char *typeStr = (curPage.type && curPage.type[0]) ? curPage.type : "PAGE";
-        float y = (float)BODY_Y_START;
+    const char *typeStr = (curPage.type && curPage.type[0]) ? curPage.type : "PAGE";
+    
+    float currentY = TITLE_Y;
+    // 1. Draw the Header (Not scrolled)
+    currentY = draw_wrapped_text(typeStr, TEXT_X_START, currentY, (float)TEXT_AVAIL_W, TITLE_SZ, COL_BLACK);
 
-        y = draw_wrapped_text(typeStr, TEXT_X_START, TITLE_Y, (float)TEXT_AVAIL_W, TITLE_SZ, COL_BLACK);
-        y += 4.0f;
+    currentY += 8.0f;
+    
+    C2D_Flush(); 
+    
+    // Standard Citra/3DS Hardware Scissor logic for the bottom screen:
+    // We want to clip Y from BODY_Y_START to BODY_Y_END
+    // and X from SIDEBAR_W to (BOT_W - SIDEBAR_W)
+    // Because of the screen rotation, we map it like this:
+    int scissorX = BODY_Y_START;
+    int scissorY = SIDEBAR_W;
+    int scissorW = BODY_Y_END - BODY_Y_START;
+    int scissorH = BOT_W - (SIDEBAR_W * 2);
+    int clipTop = (int)currentY;
+    int clipBottom = BODY_Y_END;
 
-        for (size_t i = 0; i < curPage.textCount; i++) {
-            if (!curPage.text[i] || !curPage.text[i][0])
-                continue;
-            y = draw_wrapped_text(curPage.text[i], TEXT_X_START, y, (float)TEXT_AVAIL_W, BODY_SZ, COL_BLACK);
-            y += 4.0f;
-            if (y > BODY_Y_END - 24.0f)
-                break;
-        }
+    C3D_SetScissor(GPU_SCISSOR_NORMAL, clipTop, SIDEBAR_W, clipBottom, BOT_W - SIDEBAR_W);
 
-        if (curPage.command && curPage.command[0]) {
-            y += 2.0f;
-            draw_wrapped_text(curPage.command, TEXT_X_START, y, (float)TEXT_AVAIL_W, CMD_SZ, COL_BLUE);
-        }
+    // 3. Draw text with the Y offset (subtracted by textScrollY)
+    float drawY = currentY - textScrollY;
 
-        break;
+    for (size_t i = 0; i < curPage.textCount; i++) {
+        if (!curPage.text[i] || !curPage.text[i][0]) continue;
+        drawY = draw_wrapped_text(curPage.text[i], TEXT_X_START, drawY, (float)TEXT_AVAIL_W, BODY_SZ, COL_BLACK);
+        drawY += 4.0f;
+        // REMOVE the 'if (y > BODY_Y_END) break' so it calculates all lines
     }
+
+    if (curPage.command && curPage.command[0]) {
+        drawY += 2.0f;
+        drawY = draw_wrapped_text(curPage.command, TEXT_X_START, drawY, (float)TEXT_AVAIL_W, CMD_SZ, COL_BLUE);
+    }
+
+    // 4. Reset Scissor
+    C2D_Flush();
+    C3D_SetScissor(GPU_SCISSOR_DISABLE, 0, 0, 0, 0);
+
+    break;
+}
     }
 
     needsRedraw = false;
     C3D_FrameEnd(0);
+}
+
+int read_resume_page() {
+    FILE* f = fopen("sdmc:/mspa/resume.txt", "r");
+    if (!f) return -1;
+
+    int p = -1;
+    if (fscanf(f, "%d", &p) != 1) {
+        p = -1;
+    }
+
+    fclose(f);
+    return p;
+}
+
+void save_resume_page(int page) {
+    // Create the directory just in case it doesn't exist
+    mkdir("sdmc:/mspa", 0777); 
+
+    FILE* f = fopen("sdmc:/mspa/resume.txt", "w");
+    if (f) {
+        fprintf(f, "%d", page);
+        fclose(f);
+        
+        // Update the globals so the menu reacts immediately
+        resumePage = page;
+        resumeAvailable = true;
+    }
 }
 
 
@@ -722,11 +770,19 @@ int main(void) {
     botTarget = C2D_CreateScreenTarget(GFX_BOTTOM, GFX_LEFT);
     bot_init();
     mspa_image_make_placeholder(&placeholder);
-    resumeAvailable = find_latest_cached_page(&resumePage);
+
+    resumeAvailable = read_resume_page();
+	if (resumeAvailable) {
+    		resumePage = read_resume_page(); 
+	} else {
+    		resumePage = startPage;
+     }
 
     while (aptMainLoop()) {
         hidScanInput();
         u32 kDown = hidKeysDown();
+        u32 kHeld = hidKeysHeld(); 
+
         if (kDown & KEY_START)
             break;
 
@@ -739,14 +795,49 @@ int main(void) {
                 if (resumeAvailable && (kDown & KEY_B)) {
                     begin_page_load(resumePage);
                 }
+
+		if (kDown & KEY_X) {
+        static SwkbdState swkbd;
+        char inputBuf[10]; // Buffer for the page number string
+        
+        // Initialize the keyboard as a Numpad
+        swkbdInit(&swkbd, SWKBD_TYPE_NUMPAD, 1, 7); 
+        swkbdSetHintText(&swkbd, "Enter page number...");
+        
+        // Launch the keyboard (this is a blocking call)
+        SwkbdButton button = swkbdInputText(&swkbd, inputBuf, sizeof(inputBuf));
+        
+        // If the user didn't press 'Cancel'
+        if (button != SWKBD_BUTTON_NONE) {
+            int targetPage = atoi(inputBuf); // Convert string to integer
+            if (targetPage > 0) {
+                begin_page_load(targetPage);
+            }
+        }
+        needsRedraw = true; // Tell the engine to redraw the menu after the KB closes
+    }
+
                 break;
 
             case STATE_READING:
+                // Scrolling logic
+                if (kHeld & KEY_UP) {
+                    textScrollY -= 4;
+                    if (textScrollY < 0) textScrollY = 0;
+                    needsRedraw = true;
+                }
+                if (kHeld & KEY_DOWN) {
+                    textScrollY += 4;
+                    needsRedraw = true;
+                }  
+
+                // Navigation logic
                 if (kDown & KEY_A) {
                     int nextPage = curPage.next;
                     if (nextPage <= pageNum)
                         nextPage = pageNum + 1;
                     begin_page_load(nextPage);
+		    save_resume_page(pageNum);
                 }
                 if ((kDown & KEY_B) && pageNum > startPage) {
                     begin_page_load(pageNum - 1);
@@ -756,12 +847,12 @@ int main(void) {
                     state = STATE_MENU;
                     needsRedraw = true;
                 }
-                break;
+                break; // This closes STATE_READING
 
             case STATE_LOADING:
                 break;
-            }
-        }
+            } // This closes the switch(state)
+        } // This closes the if(!loadJob.active)
 
         if (loadJob.active) {
             advance_load_job();

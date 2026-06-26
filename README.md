@@ -11,7 +11,7 @@ A homebrew app that lets you read MS Paint Adventures webcomics on your 3DS. It 
 - Problem Sleuth
 
 **Incomplete Comics:**
-- Homestuck (the ´[S]´ page video archive is incomplete so far, only featuring 3 pages. Any help would be appreciated!)
+- Homestuck (the `[S]` page video archive is incomplete so far, only featuring 3 pages. Any help would be appreciated!)
 
 More can be added — the reader accepts any comic hosted on `mspa.chadthundercock.com`, and MSPFA support is planned.
 

@@ -1,0 +1,224 @@
+#include "pl_mpeg.h"
+#include <stddef.h> // Defines size_t
+#include <stdio.h>  // Defines FILE
+#include <stdint.h>
+
+#include "mspa_video.h"
+#include <citro2d.h>
+#include <malloc.h>
+#include <stdlib.h>
+#include <string.h>
+
+#define VIDEO_MAX_W 320
+#define VIDEO_MAX_H 240
+#define VIDEO_AUDIO_SLOTS 4
+#define VIDEO_AUDIO_MAX_SAMPLES (PLM_AUDIO_SAMPLES_PER_FRAME * 2)
+
+static void resize_rgba_fit(const uint8_t *src, int sw, int sh,
+                            uint8_t **dstOut, int *dwOut, int *dhOut) {
+    if (!src || sw <= 0 || sh <= 0 || !dstOut || !dwOut || !dhOut) return;
+    int dw = sw, dh = sh;
+    if (dw > VIDEO_MAX_W) { dh = dh * VIDEO_MAX_W / dw; dw = VIDEO_MAX_W; }
+    if (dh > VIDEO_MAX_H) { dw = dw * VIDEO_MAX_H / dh; dh = VIDEO_MAX_H; }
+    if (dw <= 0 || dh <= 0) return;
+
+    uint8_t *dst = (uint8_t *)malloc((size_t)dw * (size_t)dh * 4u);
+    if (!dst) return;
+    for (int y = 0; y < dh; y++) {
+        int sy = (y * sh) / dh;
+        for (int x = 0; x < dw; x++) {
+            int sx = (x * sw) / dw;
+            memcpy(&dst[((size_t)y * dw + x) * 4u], &src[((size_t)sy * sw + sx) * 4u], 4u);
+        }
+    }
+    *dstOut = dst;
+    *dwOut = dw;
+    *dhOut = dh;
+}
+
+typedef struct {
+    ndspWaveBuf wave;
+    s16 *pcm;
+    bool queued;
+} AudioSlot;
+
+typedef struct {
+    MspaVideo *video;
+    AudioSlot slots[VIDEO_AUDIO_SLOTS];
+    int slotIndex;
+} VideoRuntime;
+
+static VideoRuntime g_runtime = {0};
+static bool         g_ndsp_active = false;  /* ndsp initialized once, lives until app exit */
+
+static void video_audio_reclaim(MspaVideo *video) {
+    (void)video;
+    for (int i = 0; i < VIDEO_AUDIO_SLOTS; i++) {
+        AudioSlot *slot = &g_runtime.slots[i];
+        if (slot->queued && slot->wave.status == NDSP_WBUF_DONE) {
+            linearFree(slot->pcm);
+            slot->pcm = NULL;
+            slot->queued = false;
+            memset(&slot->wave, 0, sizeof(slot->wave));
+        }
+    }
+}
+
+static void video_queue_samples(MspaVideo *video, const plm_samples_t *samples) {
+    if (!video || !samples || !video->audioReady) return;
+    video_audio_reclaim(video);
+
+    AudioSlot *slot = NULL;
+    for (int i = 0; i < VIDEO_AUDIO_SLOTS; i++) {
+        AudioSlot *candidate = &g_runtime.slots[i];
+        if (!candidate->queued) { slot = candidate; break; }
+    }
+    if (!slot) return;
+
+    const int channels = 2;
+    size_t frames = samples->count;
+    if (frames == 0) return;
+    size_t nsamples = frames * channels;
+    size_t bytes = nsamples * sizeof(s16);
+    s16 *pcm = (s16 *)linearAlloc(bytes);
+    if (!pcm) return;
+
+    const float *src = samples->interleaved;
+    for (size_t i = 0; i < nsamples; i++) {
+        float v = src[i];
+        if (v > 1.0f) v = 1.0f;
+        if (v < -1.0f) v = -1.0f;
+        pcm[i] = (s16)(v * 32767.0f);
+    }
+
+    memset(&slot->wave, 0, sizeof(slot->wave));
+    slot->wave.data_pcm16 = pcm;
+    slot->wave.nsamples = (u32)nsamples;
+    slot->wave.looping = false;
+    slot->wave.status = NDSP_WBUF_FREE;
+    slot->pcm = pcm;
+    slot->queued = true;
+
+    DSP_FlushDataCache(pcm, bytes);
+    ndspChnWaveBufAdd(video->audioChannel, &slot->wave);
+}
+
+static void video_on_video(plm_t *plm, plm_frame_t *frame, void *user) {
+    (void)plm;
+    MspaVideo *video = (MspaVideo *)user;
+    if (!video || !frame || !frame->width || !frame->height) return;
+
+    size_t rgbaBytes = (size_t)frame->width * (size_t)frame->height * 4u;
+    uint8_t *rgba = (uint8_t *)malloc(rgbaBytes);
+    if (!rgba) return;
+
+    plm_frame_to_rgba(frame, rgba, (int)frame->width * 4);
+
+    uint8_t *scaled = NULL;
+    int dw = 0, dh = 0;
+    resize_rgba_fit(rgba, (int)frame->width, (int)frame->height, &scaled, &dw, &dh);
+    free(rgba);
+    if (!scaled) return;
+
+    mspa_image_free(&video->image);
+    if (!mspa_image_from_rgba(&video->image, dw, dh, scaled)) {
+        free(scaled);
+        return;
+    }
+    free(scaled);
+    video->srcW = (int)frame->width;
+    video->srcH = (int)frame->height;
+    video->active = true;
+}
+
+static void video_on_audio(plm_t *plm, plm_samples_t *samples, void *user) {
+    (void)plm;
+    video_queue_samples((MspaVideo *)user, samples);
+}
+
+bool mspa_video_open(MspaVideo *video, const char *path) {
+    if (!video || !path || !path[0]) return false;
+    memset(video, 0, sizeof(*video));
+    snprintf(video->path, sizeof(video->path), "%s", path);
+    video->audioChannel = 0;
+
+    plm_t *plm = plm_create_with_filename(path);
+    if (!plm) return false;
+
+    plm_set_loop(plm, 1);
+    plm_set_video_enabled(plm, 1);
+    plm_set_audio_enabled(plm, 1);
+    plm_set_video_decode_callback(plm, video_on_video, video);
+    plm_set_audio_decode_callback(plm, video_on_audio, video);
+
+    video->plm = plm;
+    video->fps = plm_get_framerate(plm);
+    video->sampleRate = plm_get_samplerate(plm);
+    if (video->sampleRate <= 0) video->sampleRate = 44100;
+
+    /* Init ndsp once for the lifetime of the app; on subsequent videos just
+       reconfigure the channel (calling ndspInit again would fail/crash). */
+    if (!g_ndsp_active) {
+        if (R_SUCCEEDED(ndspInit())) {
+            ndspSetOutputMode(NDSP_OUTPUT_STEREO);
+            ndspSetOutputCount(2);
+            g_ndsp_active = true;
+        }
+    }
+    if (g_ndsp_active) {
+        ndspChnReset(video->audioChannel);
+        ndspChnSetInterp(video->audioChannel, NDSP_INTERP_LINEAR);
+        ndspChnSetRate(video->audioChannel, (float)video->sampleRate);
+        ndspChnSetFormat(video->audioChannel, NDSP_FORMAT_STEREO_PCM16);
+        video->audioReady = true;
+    } else {
+        video->audioReady = false;
+    }
+
+    video->lastTickMs = osGetTime();
+    video->active = true;
+    video->failed = false;
+    g_runtime.video = video;
+    memset(g_runtime.slots, 0, sizeof(g_runtime.slots));
+    g_runtime.slotIndex = 0;
+    return true;
+}
+
+void mspa_video_tick(MspaVideo *video) {
+    if (!video || !video->plm || !video->active || video->failed) return;
+    u64 now = osGetTime();
+    double dt = (double)(now - video->lastTickMs) / 1000.0;
+    if (dt <= 0.0) dt = 1.0 / 30.0;
+    video->lastTickMs = now;
+
+    plm_decode((plm_t *)video->plm, dt);
+    video_audio_reclaim(video);
+    if (plm_has_ended((plm_t *)video->plm)) {
+        plm_rewind((plm_t *)video->plm);
+    }
+}
+
+void mspa_video_close(MspaVideo *video) {
+    if (!video) return;
+    if (video->plm) {
+        plm_destroy((plm_t *)video->plm);
+        video->plm = NULL;
+    }
+    if (video->audioReady) {
+        ndspChnWaveBufClear(video->audioChannel);
+        /* Don't call ndspExit — ndsp stays alive for the next video load.
+           It will be cleaned up automatically when the process exits. */
+        video->audioReady = false;
+    }
+    for (int i = 0; i < VIDEO_AUDIO_SLOTS; i++) {
+        AudioSlot *slot = &g_runtime.slots[i];
+        if (slot->pcm) {
+            linearFree(slot->pcm);
+            slot->pcm = NULL;
+        }
+        memset(&slot->wave, 0, sizeof(slot->wave));
+        slot->queued = false;
+    }
+    mspa_image_free(&video->image);
+    memset(video, 0, sizeof(*video));
+}

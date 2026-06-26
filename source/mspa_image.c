@@ -1,7 +1,4 @@
 #include "mspa_image.h"
-#include "mspa_http.h"
-
-#include <3ds/services/httpc.h>
 #include <libnsgif.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -9,12 +6,12 @@
 #include <stdint.h>
 #include <malloc.h>
 #include <sys/stat.h>
-#include <errno.h>
 
 #define PANEL_DIR  "sdmc:/3ds/MSPA-3DS/panels"
 #define LOG_PATH   "sdmc:/3ds/MSPA-3DS/debug.log"
 #define RAW_MAGIC   0x53524134u  /* "SRA4" — raw compressed image bytes */
 #define TEX_MAGIC   0x58455435u  /* "TEX5" */
+#define TEX_FMT_RAW_RGBA 0x80u  /* Untiled RGBA — needs GPU transfer */
 #define MAX_IMAGE_BYTES (48u * 1024u * 1024u)
 #define ANIM_MAGIC 0x53485432u  /* "SHT2" */
 
@@ -32,13 +29,7 @@ static void log_msg(const char *tag, const char *msg) {
     fclose(f);
 }
 
-static void log_err(const char *url, Result rc, const char *step) {
-    ensure_dirs();
-    FILE *f = fopen(LOG_PATH, "a");
-    if (!f) return;
-    fprintf(f, "[ERR] step=%s rc=%08lX url=%s\n", step, rc, url ? url : "?");
-    fclose(f);
-}
+/* log_err removed — no network errors to log */
 
 static int next_pow2(int v) {
     int p = 64;
@@ -295,7 +286,9 @@ static bool upload_rgba(MspaImage *out, int w, int h, const uint8_t *rgba) {
     return true;
 }
 
-static bool http_fetch_raw(const char *url, uint8_t **bufOut, size_t *sizeOut) {
+/* http_fetch_raw removed — replaced by ZIP bundle extraction */
+#if 0 /* removed */
+static bool http_fetch_raw_DISABLED(const char *url, uint8_t **bufOut, size_t *sizeOut) {
     Result ret = 0;
     httpcContext ctx;
     char *newurl = NULL;
@@ -375,6 +368,7 @@ static bool http_fetch_raw(const char *url, uint8_t **bufOut, size_t *sizeOut) {
     *sizeOut = size;
     return size > 0;
 }
+#endif /* removed */
 
 bool mspa_panel_decode_gif_bytes(const uint8_t *gifData, size_t gifSize,
                                  int *w, int *h, uint8_t **rgbaOut) {
@@ -490,36 +484,12 @@ bool mspa_panel_rgba_to_tex_file(const uint8_t *rgba, int w, int h,
     return ok;
 }
 
-bool mspa_panel_download_gif(const char *url, const char *gifPath,
-                             void (*status)(const char *)) {
-    if (status) status("downloading gif...");
-
-    uint8_t *raw = NULL;
-    size_t rawSz = 0;
-    if (!http_fetch_raw(url, &raw, &rawSz)) {
-        if (status) status("FAIL: download");
-        return false;
-    }
-
-    FILE *f = fopen(gifPath, "wb");
-    if (!f) {
-        free(raw);
-        if (status) status("FAIL: write gif");
-        return false;
-    }
-
-    bool ok = fwrite(raw, 1, rawSz, f) == rawSz;
-    fclose(f);
-    free(raw);
-
-    if (!ok) {
-        remove(gifPath);
-        if (status) status("FAIL: gif save");
-        return false;
-    }
-
-    return true;
+bool mspa_image_from_rgba(MspaImage *out, int w, int h, const uint8_t *rgba) {
+    return upload_rgba(out, w, h, rgba);
 }
+
+/* mspa_panel_download_file and mspa_panel_download_gif removed —
+   replaced by ZIP bundle extraction via mspa_bundle_ensure_media() */
 
 static bool load_gif_file_to_rgba(const char *gifPath, uint8_t **rgba, int *w, int *h) {
     uint8_t *bytes = NULL;
@@ -737,7 +707,65 @@ bool mspa_panel_load_tex_file(const char *texPath, MspaImage *out) {
         fread(&format, 4, 1, f) == 1 &&
         fread(&dataSize, 4, 1, f) == 1;
 
-    if (!ok || dataSize == 0 || texW == 0 || texH == 0 || format != (uint32_t)GPU_RGBA8) {
+    if (!ok || dataSize == 0 || texW == 0 || texH == 0) {
+        fclose(f);
+        return false;
+    }
+
+    /* ── Format 0x80: Untiled RGBA — do GPU transfer, then re-save ── */
+    if (format == TEX_FMT_RAW_RGBA) {
+        /* Accept both tightly-packed (w*h*4) and padded (texW*texH*4) data sizes.
+         * Older Python scripts padded to texW stride, newer ones write tightly packed.
+         * upload_rgba reads with stride w*4, so we must repack padded data first. */
+        size_t expect_tight  = (size_t)width * (size_t)height * 4u;
+        size_t expect_padded = (size_t)texW * (size_t)texH * 4u;
+        if (dataSize != expect_tight && dataSize != expect_padded) {
+            fclose(f);
+            return false;
+        }
+
+        uint8_t *raw = (uint8_t *)malloc(dataSize);
+        if (!raw) { fclose(f); return false; }
+
+        if (fread(raw, 1, dataSize, f) != dataSize) {
+            free(raw);
+            fclose(f);
+            return false;
+        }
+        fclose(f);
+
+        /* If data is padded to texW stride, repack to w stride
+         * because upload_rgba reads with stride w*4 */
+        uint8_t *rgba;
+        if (dataSize == expect_padded && (uint32_t)texW != width) {
+            rgba = (uint8_t *)malloc(expect_tight);
+            if (!rgba) { free(raw); return false; }
+            for (uint32_t y = 0; y < height; y++) {
+                memcpy(rgba + (size_t)y * (size_t)width * 4u,
+                       raw  + (size_t)y * (size_t)texW * 4u,
+                       (size_t)width * 4u);
+            }
+            free(raw);
+        } else {
+            /* Already tightly packed */
+            rgba = raw;
+        }
+
+        /* upload_rgba does RGBA→ABGR swizzle + GPU tiling + transfer.
+         * This is the exact same path the GIF pipeline uses, proven correct. */
+        bool uploaded = upload_rgba(out, (int)width, (int)height, rgba);
+        free(rgba);
+
+        if (!uploaded) return false;
+
+        /* Do NOT write back a cached tiled .tex — the GPU transfer is
+         * fast enough (~1ms for 320×240) and SD writes are what cause
+         * lag. Just re-read and re-transfer each time. */
+        return true;
+    }
+
+    /* ── Format 0: GPU_RGBA8 (tiled) — direct load ── */
+    if (format != (uint32_t)GPU_RGBA8) {
         fclose(f);
         return false;
     }
@@ -782,46 +810,7 @@ bool mspa_panel_load_tex_file(const char *texPath, MspaImage *out) {
     return true;
 }
 
-bool mspa_panel_download_and_save(const char *url, const char *sdPath,
-                                  void (*status)(const char *)) {
-    if (status) status("fetching...");
-
-    uint8_t *raw = NULL;
-    size_t rawSz = 0;
-    if (!http_fetch_raw(url, &raw, &rawSz)) {
-        if (status) status("FAIL: network");
-        return false;
-    }
-
-    if (status) status("saving...");
-    ensure_dirs();
-
-    FILE *f = fopen(sdPath, "wb");
-    if (!f) {
-        free(raw);
-        if (status) status("FAIL: write open");
-        return false;
-    }
-
-    uint32_t magic = RAW_MAGIC;
-    uint32_t rawSize = (uint32_t)rawSz;
-    bool ok =
-        fwrite(&magic, 4, 1, f) == 1 &&
-        fwrite(&rawSize, 4, 1, f) == 1 &&
-        fwrite(raw, 1, rawSz, f) == rawSz;
-
-    fclose(f);
-    free(raw);
-
-    if (!ok) {
-        remove(sdPath);
-        if (status) status("FAIL: write disk");
-        return false;
-    }
-
-    if (status) status("saved OK");
-    return true;
-}
+/* mspa_panel_download_and_save removed — legacy, replaced by bundle extraction */
 
 bool mspa_panel_load(const char *sdPath, MspaImage *out) {
     if (!sdPath || !out) return false;

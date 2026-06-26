@@ -11,24 +11,29 @@
 
 #include "mspa_page.h"
 #include "mspa_image.h"
+#include "mspa_audio.h"
+#include "mspa_bundle.h"
 
-#define SOC_ALIGN      0x1000
-#define SOC_BUFFERSIZE 0x100000
+/* ═══════════════════════════════════════════════════════════════════════
+ * APP STATE
+ * ═══════════════════════════════════════════════════════════════════════ */
 
 typedef enum {
-    STATE_MENU,
+    STATE_PACK_SELECT,
     STATE_LOADING,
     STATE_READING
 } AppState;
 
 typedef enum {
     LOAD_IDLE,
-    LOAD_PAGE_JSON,
-    LOAD_GIF_DOWNLOAD,
-    LOAD_GIF_READ,
-    LOAD_GIF_CONVERT_FRAME,  /* one GIF frame per game-loop tick */
-    LOAD_GIF_DELETE,
-    LOAD_TEX_LOAD,
+    LOAD_PAGE_JSON,       /* read page JSON from bundle folder */
+    LOAD_MEDIA_READ,      /* read media file directly from bundle folder */
+    LOAD_GIF_READ,        /* read raw GIF bytes from SD */
+    LOAD_GIF_CONVERT_FRAME,/* one GIF frame per game-loop tick */
+    LOAD_GIF_DELETE,      /* delete raw GIF from SD */
+    LOAD_AUDIO_READ,      /* read audio file directly from bundle folder */
+    LOAD_AUDIO_OPEN,      /* open WAV with ndsp */
+    LOAD_TEX_LOAD,        /* load .tex into GPU */
     LOAD_COMMIT,
     LOAD_FAIL
 } LoadStage;
@@ -40,10 +45,14 @@ typedef struct {
     MspaPage page;
     MspaImage image;
     MspaImage tempImage;
-    char basePath[192];
-    char gifPath[224];
-    char texPath[224]; 
+    char mediaPath[224];       /* full path to media file in bundle folder */
+    char audioPath[224];       /* full path to audio file in bundle folder */
+    char texPath[224];
     char animPath[224];
+    char mediaRelPath[224];    /* full base path in bundle (e.g. "<bundle>/media/001901_0") */
+    bool hasAudio;
+    int targetMediaIndex;
+    MspaAudio audio;
     MspaAnimManifest meta;
     uint32_t *delaysMs;
     uint32_t frameCount;
@@ -51,13 +60,13 @@ typedef struct {
     u64 nextFrameAtMs;
     uint8_t *gifBytes;
     size_t gifBytesSize;
-    MspaGifConverter converter;  /* streamed frame-by-frame converter */
+    MspaGifConverter converter;
 } LoadJob;
 
 typedef struct {
     bool active;
-    char basePath[192];
-    char animPath[224];
+    char basePath[320];        /* full bundle media base path (e.g. "<bundle>/media/001901_0") */
+    char animPath[320];
     MspaAnimManifest meta;
     uint32_t *delaysMs;
     uint32_t frameCount;
@@ -65,30 +74,44 @@ typedef struct {
     u64 nextFrameAtMs;
 } PanelAnimation;
 
-static u32              *socBuf       = NULL;
+/* ── Globals ──────────────────────────────────────────────────────────── */
+
 static C3D_RenderTarget *topTarget    = NULL;
 static C3D_RenderTarget *botTarget    = NULL;
 static MspaImage         curImage     = {0};
+static MspaAudio         curAudio     = {0};
 static MspaImage         placeholder  = {0};
 static MspaPage          curPage      = {0};
-static AppState          state        = STATE_MENU;
+static AppState          state        = STATE_PACK_SELECT;
 static bool              needsRedraw  = true;
 static bool              pageLoadedOk = false;
-static int               pageNum      = 1901;
-static int               startPage    = 1901;
+static int               pageNum      = 0;
+static int               curMediaIndex = 0;
 static LoadJob           loadJob      = {0};
 static PanelAnimation    curAnim      = {0};
 static int               textScrollY  = 0;
-static bool              resumeAvailable = false;
 static int               resumePage   = 0;
+
+/* Pack selection */
+#define MAX_PACKS 32
+static MspaBundle        packs[MAX_PACKS];
+static int               packCount    = 0;
+static int               selectedPack = 0;
+static MspaBundle       *activeBundle = NULL;  /* currently open bundle */
+
+/* ═══════════════════════════════════════════════════════════════════════
+ * HELPERS
+ * ═══════════════════════════════════════════════════════════════════════ */
 
 static const char *load_stage_name(LoadStage s) {
     switch (s) {
     case LOAD_PAGE_JSON:        return "load page";
-    case LOAD_GIF_DOWNLOAD:     return "download gif";
+    case LOAD_MEDIA_READ:      return "read media";
     case LOAD_GIF_READ:         return "read gif";
     case LOAD_GIF_CONVERT_FRAME:return "convert frames";
     case LOAD_GIF_DELETE:       return "delete gif";
+    case LOAD_AUDIO_READ:      return "read audio";
+    case LOAD_AUDIO_OPEN:       return "open audio";
     case LOAD_TEX_LOAD:         return "load tex";
     case LOAD_COMMIT:           return "commit";
     case LOAD_FAIL:             return "fail";
@@ -106,46 +129,12 @@ static bool file_exists(const char *path) {
 static void ensure_sd_dirs(void) {
     mkdir("sdmc:/3ds", 0777);
     mkdir("sdmc:/3ds/MSPA-3DS", 0777);
-    mkdir("sdmc:/3ds/MSPA-3DS/pages", 0777);
-    mkdir("sdmc:/3ds/MSPA-3DS/panels", 0777);
+    mkdir("sdmc:/3ds/MSPA-3DS/packs", 0777);
 }
 
-static bool find_latest_cached_page(int *pageOut) {
-    if (pageOut) *pageOut = 0;
-    DIR *dir = opendir("sdmc:/3ds/MSPA-3DS/pages");
-    if (!dir) return false;
-
-    int bestPage = 0;
-    time_t bestMtime = 0;
-    struct dirent *ent;
-
-    while ((ent = readdir(dir)) != NULL) {
-        const char *name = ent->d_name;
-        size_t len = strlen(name);
-        if (len != 10) continue; /* 000000.json */
-        if (strcmp(name + 6, ".json") != 0) continue;
-        for (int i = 0; i < 6; i++) {
-            if (name[i] < '0' || name[i] > '9') goto next_entry;
-        }
-        {
-            char path[160];
-            snprintf(path, sizeof(path), "sdmc:/3ds/MSPA-3DS/pages/%s", name);
-            struct stat st;
-            if (stat(path, &st) != 0) goto next_entry;
-            int p = atoi(name);
-            if (p > 0 && (bestPage == 0 || st.st_mtime > bestMtime || (st.st_mtime == bestMtime && p > bestPage))) {
-                bestPage = p;
-                bestMtime = st.st_mtime;
-            }
-        }
-        next_entry: ;
-    }
-
-    closedir(dir);
-    if (bestPage <= 0) return false;
-    if (pageOut) *pageOut = bestPage;
-    return true;
-}
+/* ═══════════════════════════════════════════════════════════════════════
+ * PANEL ANIMATION (unchanged)
+ * ═══════════════════════════════════════════════════════════════════════ */
 
 static void panel_anim_free(void) {
     free(curAnim.delaysMs);
@@ -158,16 +147,15 @@ static void panel_anim_free(void) {
     curAnim.animPath[0] = '\0';
 }
 
-
 static void panel_anim_apply_frame(uint32_t frame) {
     if (!curAnim.active || curAnim.frameCount == 0) return;
     if (frame >= curAnim.frameCount) return;
 
-    /* build path for this frame's tex file */
-    char framePath[256];
-    mspa_panel_frame_tex_path(curAnim.basePath, frame, framePath, sizeof(framePath));
+    /* Build the .tex path directly inside the bundle folder.
+     * curAnim.basePath is like "sdmc:/3ds/MSPA-3DS/packs/<pack>/media/001901_0" */
+    char framePath[320];
+    snprintf(framePath, sizeof(framePath), "%s-%03u.tex", curAnim.basePath, (unsigned)frame);
 
-    /* load new frame first, then free old one to avoid a gap */
     MspaImage newImg = {0};
     if (!mspa_panel_load_tex_file(framePath, &newImg)) return;
 
@@ -178,37 +166,18 @@ static void panel_anim_apply_frame(uint32_t frame) {
     curAnim.currentFrame  = frame;
 }
 
-static void panel_anim_start_for_page(const MspaPage *pg, int page) {
+static void panel_anim_start_for_page(const char *bundleMediaBase, int frameCount,
+                                       const MspaAnimManifest *meta, const uint32_t *delays) {
     panel_anim_free();
-    if (!pg || !pg->media || !pg->media[0]) return;
-
-    char base[192], animPath[224];
-    mspa_panel_path_from_url(pg->media, page, 1, 1, base, sizeof(base));
-    snprintf(animPath, sizeof(animPath), "%s.anim", base);
-
-    if (!file_exists(animPath)) return;
-
-    MspaAnimManifest meta = {0};
-    uint32_t *delays = NULL;
-    if (!mspa_panel_load_anim_manifest(animPath, &meta, &delays)) {
-        free(delays);
-        return;
-    }
-
-    if (meta.frameCount == 0 || !delays) {
-        free(delays);
-        return;
-    }
+    if (!bundleMediaBase || frameCount <= 0 || !meta || !delays) return;
 
     curAnim.active = true;
-    strncpy(curAnim.basePath, base, sizeof(curAnim.basePath) - 1);
-    strncpy(curAnim.animPath, animPath, sizeof(curAnim.animPath) - 1);
-    curAnim.meta       = meta;
-    curAnim.delaysMs   = delays;
-    curAnim.frameCount = meta.frameCount;
+    strncpy(curAnim.basePath, bundleMediaBase, sizeof(curAnim.basePath) - 1);
+    curAnim.meta       = *meta;
+    curAnim.delaysMs   = (uint32_t *)delays;
+    curAnim.frameCount = frameCount;
     curAnim.currentFrame = 0;
 
-    /* load frame 0 — replaces whatever static image is currently shown */
     panel_anim_apply_frame(0);
 
     uint32_t firstDelay = curAnim.delaysMs[0] ? curAnim.delaysMs[0] : 100u;
@@ -232,6 +201,10 @@ static void panel_anim_tick(void) {
     uint32_t delay = curAnim.delaysMs[nextFrame] ? curAnim.delaysMs[nextFrame] : 50u;
     curAnim.nextFrameAtMs = now + delay;
 }
+
+/* ═══════════════════════════════════════════════════════════════════════
+ * FILE HELPERS
+ * ═══════════════════════════════════════════════════════════════════════ */
 
 static bool read_entire_file(const char *path, uint8_t **bufOut, size_t *sizeOut) {
     if (bufOut) *bufOut = NULL;
@@ -275,41 +248,39 @@ static bool resize_rgba_nearest(const uint8_t *src, int sw, int sh,
     return true;
 }
 
+/* ═══════════════════════════════════════════════════════════════════════
+ * LOAD JOB
+ * ═══════════════════════════════════════════════════════════════════════ */
+
 static void free_job_buffers(void) {
     free(loadJob.gifBytes); loadJob.gifBytes = NULL; loadJob.gifBytesSize = 0;
     mspa_gif_converter_close(&loadJob.converter);
     mspa_image_free(&loadJob.tempImage);
+    mspa_audio_close(&loadJob.audio);
 }
 
 static void load_job_reset(void) {
     mspa_page_free(&loadJob.page);
     mspa_image_free(&loadJob.image);
+    mspa_audio_close(&loadJob.audio);
     free_job_buffers();
     memset(&loadJob, 0, sizeof(loadJob));
 }
 
-static void build_panel_paths(const char *mediaUrl, int page, char *base, size_t baseLen,
-                              char *gifPath, size_t gifLen,
-                              char *texPath, size_t texLen,
-                              char *animPath, size_t animLen) {
-    mspa_panel_path_from_url(mediaUrl, page, 1, 1, base, baseLen);
-    snprintf(gifPath,  gifLen,  "%s.gif",  base);
-    /* texPath = frame-0 tex; used for single-frame pages AND as the cache-exists check */
-    mspa_panel_frame_tex_path(base, 0, texPath, texLen);
-    snprintf(animPath, animLen, "%s.anim", base);
-}
-
-static void begin_page_load(int n) {
+static void begin_page_load(int n, int mediaIndex) {
     if (loadJob.active) return;
-    if (n < startPage) n = startPage;
+    if (!activeBundle) return;
+
     pageNum = n;
 
     panel_anim_free();
+    mspa_audio_close(&curAudio);
     mspa_image_free(&curImage);
 
     load_job_reset();
     loadJob.active = true;
     loadJob.targetPage = n;
+    loadJob.targetMediaIndex = mediaIndex;
     loadJob.stage = LOAD_PAGE_JSON;
     state = STATE_LOADING;
     pageLoadedOk = false;
@@ -321,26 +292,49 @@ static void commit_loaded_page(void) {
     mspa_page_free(&curPage);
     mspa_image_free(&curImage);
 
-    /* Transfer ownership of page data */
     curPage = loadJob.page;
     memset(&loadJob.page, 0, sizeof(loadJob.page));
 
-    /* Fix page number BEFORE starting animation so path building is correct */
     if (curPage.page == 0)
         curPage.page = loadJob.targetPage;
     pageNum = curPage.page;
 
-    /* Transfer image ownership — zero loadJob.image WITHOUT freeing the GPU
-       texture, since curImage now owns it. */
+    curMediaIndex = loadJob.targetMediaIndex;
+    if (loadJob.hasAudio) {
+        curAudio = loadJob.audio;
+        memset(&loadJob.audio, 0, sizeof(loadJob.audio));
+    } else {
+        mspa_audio_close(&curAudio);
+    }
+
+    /* Transfer image from loadJob */
     curImage = loadJob.image;
     curImage.image.tex    = &curImage.tex;
     curImage.image.subtex = &curImage.subtex;
-    memset(&loadJob.image, 0, sizeof(loadJob.image)); /* ownership transferred */
+    memset(&loadJob.image, 0, sizeof(loadJob.image));
 
-    /* Start animation AFTER pageNum is correct */
-    panel_anim_start_for_page(&curPage, pageNum);
+    /* Start animation if .anim manifest exists in the bundle. */
+    if (loadJob.animPath[0] && loadJob.mediaRelPath[0]) {
+        MspaAnimManifest animMeta = {0};
+        uint32_t *animDelays = NULL;
+        if (mspa_panel_load_anim_manifest(loadJob.animPath, &animMeta, &animDelays)) {
+            if (animMeta.frameCount > 1 && animDelays) {
+                panel_anim_start_for_page(loadJob.mediaRelPath,
+                                          (int)animMeta.frameCount,
+                                          &animMeta, animDelays);
+                /* animDelays now owned by curAnim — don't free */
+            } else {
+                free(animDelays);
+            }
+        }
+    }
 
-    resumeAvailable = find_latest_cached_page(&resumePage);
+    /* Save resume point */
+    mkdir("sdmc:/mspa", 0777);
+    FILE *rf = fopen("sdmc:/mspa/resume.txt", "w");
+    if (rf) { fprintf(rf, "%d", pageNum); fclose(rf); }
+    resumePage = pageNum;
+
     pageLoadedOk = true;
     state = STATE_READING;
     needsRedraw = true;
@@ -349,7 +343,8 @@ static void commit_loaded_page(void) {
 static void fail_loaded_page(void) {
     load_job_reset();
     panel_anim_free();
-    state = (curPage.page > 0) ? STATE_READING : STATE_MENU;
+    mspa_audio_close(&curAudio);
+    state = (curPage.page > 0) ? STATE_READING : STATE_PACK_SELECT;
     pageLoadedOk = false;
     needsRedraw = true;
 }
@@ -359,27 +354,101 @@ static void advance_load_job(void) {
 
     switch (loadJob.stage) {
     case LOAD_PAGE_JSON: {
-        if (!mspa_page_load(loadJob.targetPage, &loadJob.page)) {
+        if (!activeBundle) { loadJob.stage = LOAD_FAIL; break; }
+
+        /* Get path to page JSON inside the bundle folder */
+        char jsonPath[256];
+        if (!mspa_bundle_ensure_page_json(activeBundle, loadJob.targetPage,
+                                          jsonPath, sizeof(jsonPath))) {
             loadJob.stage = LOAD_FAIL;
             break;
         }
+
+        /* Load the JSON directly (no extraction needed — it's a plain file) */
+        char *json = NULL;
+        {
+            FILE *f = fopen(jsonPath, "rb");
+            if (!f) { loadJob.stage = LOAD_FAIL; break; }
+            fseek(f, 0, SEEK_END);
+            long len = ftell(f);
+            rewind(f);
+            json = (char *)malloc((size_t)len + 1);
+            if (!json) { fclose(f); loadJob.stage = LOAD_FAIL; break; }
+            json[fread(json, 1, (size_t)len, f)] = '\0';
+            fclose(f);
+        }
+
+        /* Parse using the existing JSON parser from mspa_page.c */
+        {
+            extern bool parse_page_json(const char *json, MspaPage *out);
+            if (!parse_page_json(json, &loadJob.page)) {
+                free(json);
+                loadJob.stage = LOAD_FAIL;
+                break;
+            }
+        }
+        free(json);
+
         if (loadJob.page.page == 0)
             loadJob.page.page = loadJob.targetPage;
-        mspa_page_save_sd(loadJob.targetPage, &loadJob.page);
-        resumeAvailable = find_latest_cached_page(&resumePage);
 
-        if (loadJob.page.media && loadJob.page.media[0]) {
-            build_panel_paths(loadJob.page.media, loadJob.targetPage,
-                              loadJob.basePath, sizeof(loadJob.basePath),
-                              loadJob.gifPath, sizeof(loadJob.gifPath),
-                              loadJob.texPath, sizeof(loadJob.texPath),
-                              loadJob.animPath, sizeof(loadJob.animPath));
+        if (loadJob.page.media && loadJob.page.mediaCount > 0) {
+            size_t mi = (loadJob.targetMediaIndex < 0) ? 0 : (size_t)loadJob.targetMediaIndex;
+            if (mi >= loadJob.page.mediaCount) mi = 0;
+
+            /* The media field in bundle JSON is a relative path like "media/001901_0.gif" */
+            const char *mediaRef = loadJob.page.media[mi];
+            loadJob.hasAudio = (loadJob.page.audio && loadJob.page.audio[0]);
+
+            /* Build paths directly inside the bundle folder.
+             * No caching — read .tex/.anim directly from the pack.
+             * mediaRef = "media/001901_0.gif"
+             * base = "media/001901_0" (strip extension)
+             * texPath = "<bundle>/media/001901_0-000.tex"
+             * animPath = "<bundle>/media/001901_0.anim"
+             * mediaBasePath = "<bundle>/media/001901_0" (for animation frame loading)
+             */
+            char baseRelPath[256];
+            snprintf(baseRelPath, sizeof(baseRelPath), "%s", mediaRef);
+            char *dot = strrchr(baseRelPath, '.');
+            if (dot) *dot = '\0';
+
+            /* Full bundle-relative base path for .tex and .anim */
+            char bundleMediaBase[320];
+            snprintf(bundleMediaBase, sizeof(bundleMediaBase),
+                     "%s/%s", activeBundle->folderPath, baseRelPath);
+
+            /* Frame 0 .tex path */
+            snprintf(loadJob.texPath, sizeof(loadJob.texPath),
+                     "%s-000.tex", bundleMediaBase);
+
+            /* .anim manifest path */
+            snprintf(loadJob.animPath, sizeof(loadJob.animPath),
+                     "%s.anim", bundleMediaBase);
+
+            /* Store the media base path for animation system */
+            snprintf(loadJob.mediaRelPath, sizeof(loadJob.mediaRelPath),
+                     "%s", bundleMediaBase);
+
+            /* Full path to original media (GIF fallback) */
+            snprintf(loadJob.mediaPath, sizeof(loadJob.mediaPath),
+                     "%s/%s", activeBundle->folderPath, mediaRef);
+
+            if (loadJob.hasAudio) {
+                snprintf(loadJob.audioPath, sizeof(loadJob.audioPath),
+                         "%s/%s", activeBundle->folderPath, loadJob.page.audio);
+            } else {
+                loadJob.audioPath[0] = '\0';
+            }
+
             if (file_exists(loadJob.texPath)) {
+                /* Pre-converted .tex exists in bundle — load directly */
                 loadJob.stage = LOAD_TEX_LOAD;
-            } else if (file_exists(loadJob.gifPath)) {
+            } else if (file_exists(loadJob.mediaPath)) {
+                /* No .tex but GIF exists in bundle — decode it on-device */
                 loadJob.stage = LOAD_GIF_READ;
             } else {
-                loadJob.stage = LOAD_GIF_DOWNLOAD;
+                loadJob.stage = LOAD_FAIL;
             }
         } else {
             loadJob.stage = LOAD_COMMIT;
@@ -387,63 +456,84 @@ static void advance_load_job(void) {
         break;
     }
 
-    case LOAD_GIF_DOWNLOAD:
-        if (!mspa_panel_download_gif(loadJob.page.media, loadJob.gifPath, NULL)) {
-            loadJob.stage = LOAD_FAIL;
-            break;
-        }
-        loadJob.stage = LOAD_GIF_READ;
+    case LOAD_MEDIA_READ: {
+        /* No longer used — we read directly from the bundle folder.
+         * Kept as a passthrough in case any legacy path lands here. */
+        loadJob.stage = LOAD_FAIL;
         break;
+    }
 
-    case LOAD_GIF_READ:
-        if (!read_entire_file(loadJob.gifPath, &loadJob.gifBytes, &loadJob.gifBytesSize)) {
+    case LOAD_GIF_READ: {
+        /* Read GIF directly from bundle folder for on-device decoding.
+         * mediaPath is already the full path inside the bundle. */
+        if (!read_entire_file(loadJob.mediaPath, &loadJob.gifBytes, &loadJob.gifBytesSize)) {
             loadJob.stage = LOAD_FAIL;
             break;
         }
-        /* open the streaming converter — gifBytes stays alive until DELETE */
+        /* Write decoded .tex/.anim back into the bundle folder
+         * so they're available for future visits. basePath is
+         * the bundle media base (e.g. "<bundle>/media/001901_0") */
         if (!mspa_gif_converter_open(&loadJob.converter,
                                      loadJob.gifBytes, loadJob.gifBytesSize,
-                                     loadJob.basePath, loadJob.animPath)) {
+                                     loadJob.mediaRelPath, loadJob.animPath)) {
             loadJob.stage = LOAD_FAIL;
             break;
         }
         loadJob.stage = LOAD_GIF_CONVERT_FRAME;
         break;
+    }
 
     case LOAD_GIF_CONVERT_FRAME:
-        /* convert exactly one frame per game-loop tick */
         mspa_gif_converter_step(&loadJob.converter);
         if (loadJob.converter.failed) {
             loadJob.stage = LOAD_FAIL;
         } else if (loadJob.converter.done) {
-            /* close converter and free the gif bytes — we're done with them */
             mspa_gif_converter_close(&loadJob.converter);
             free(loadJob.gifBytes);
             loadJob.gifBytes = NULL;
             loadJob.gifBytesSize = 0;
             loadJob.stage = LOAD_GIF_DELETE;
         }
-        /* otherwise stay in LOAD_GIF_CONVERT_FRAME for next tick */
         break;
 
     case LOAD_GIF_DELETE:
-        remove(loadJob.gifPath);
+        /* Don't delete the original GIF from the bundle — it's part of the pack.
+         * The on-device decoded .tex files are saved alongside it in the bundle. */
         loadJob.stage = LOAD_TEX_LOAD;
+        break;
+
+    case LOAD_AUDIO_READ: {
+        /* Read audio directly from bundle folder.
+         * audioPath is already the full path inside the bundle. */
+        if (loadJob.hasAudio && loadJob.audioPath[0]) {
+            loadJob.stage = LOAD_AUDIO_OPEN;
+        } else {
+            loadJob.stage = LOAD_COMMIT;
+        }
+        break;
+    }
+
+    case LOAD_AUDIO_OPEN:
+        if (loadJob.hasAudio) {
+            if (!mspa_audio_open(&loadJob.audio, loadJob.audioPath)) {
+                mspa_audio_close(&loadJob.audio);
+                loadJob.hasAudio = false;
+            }
+        }
+        loadJob.stage = LOAD_COMMIT;
         break;
 
     case LOAD_TEX_LOAD:
         if (!mspa_panel_load_tex_file(loadJob.texPath, &loadJob.image)) {
-            /* stale or corrupt cache: drop tex + anim manifest and rebuild */
-            remove(loadJob.texPath);
-            remove(loadJob.animPath);
-            if (file_exists(loadJob.gifPath)) {
+            /* .tex load failed — try falling back to GIF decode */
+            if (file_exists(loadJob.mediaPath)) {
                 loadJob.stage = LOAD_GIF_READ;
             } else {
-                loadJob.stage = LOAD_GIF_DOWNLOAD;
+                loadJob.stage = LOAD_FAIL;
             }
             break;
         }
-        loadJob.stage = LOAD_COMMIT;
+        loadJob.stage = loadJob.hasAudio ? LOAD_AUDIO_READ : LOAD_COMMIT;
         break;
 
     case LOAD_COMMIT:
@@ -460,10 +550,13 @@ static void advance_load_job(void) {
     needsRedraw = true;
 }
 
+/* ═══════════════════════════════════════════════════════════════════════
+ * RENDERING (top + bottom screens — kept as-is)
+ * ═══════════════════════════════════════════════════════════════════════ */
+
 static void render_top(void) {
     C3D_FrameBegin(C3D_FRAME_SYNCDRAW);
 
-    /* Top screen: grey background, panel centered */
     C2D_TargetClear(topTarget, C2D_Color32(0xC0, 0xC0, 0xC0, 0xFF));
     C2D_SceneBegin(topTarget);
 
@@ -475,21 +568,14 @@ static void render_top(void) {
         if (y < 0.0f) y = 0.0f;
         C2D_DrawImageAt(img->image, x, y, 0.5f, NULL, 1.0f, 1.0f);
     }
-
 }
 
-/* ── bottom-screen constants ──────────────────────────────────────── */
 #define BOT_W        320
 #define BOT_H        240
 #define SIDEBAR_W     20
 #define BOT_PAD_X     10
 #define BOT_PAD_TOP    6
-#define BOT_LINE_H    18   /* px per text line                        */
-#define BOT_TITLE_SZ  0.80f
-#define BOT_BODY_SZ   0.50f
-#define BOT_CMD_SZ    0.72f
-
-/* colours */
+#define BOT_LINE_H    18
 #define COL_BG        C2D_Color32(0xE8,0xE8,0xE8,0xFF)
 #define COL_SIDEBAR   C2D_Color32(0xD0,0xD0,0xD0,0xFF)
 #define COL_WHITE     C2D_Color32(0xFF,0xFF,0xFF,0xFF)
@@ -498,12 +584,9 @@ static void render_top(void) {
 #define COL_BLUE      C2D_Color32(0x00,0x00,0xCC,0xFF)
 #define COL_GREY      C2D_Color32(0x77,0x77,0x77,0xFF)
 
-/* text area x range (inside card) */
 #define TEXT_X_START  (SIDEBAR_W + BOT_PAD_X)
 #define TEXT_X_END    (BOT_W - SIDEBAR_W - BOT_PAD_X)
 #define TEXT_AVAIL_W  (TEXT_X_END - TEXT_X_START)
-
-/* title bar bottom y, divider y */
 #define TITLE_Y       BOT_PAD_TOP
 #define DIV_Y         (TITLE_Y + 18)
 #define BODY_Y_START  (DIV_Y + 4)
@@ -511,17 +594,10 @@ static void render_top(void) {
 
 static C2D_TextBuf textBuf = NULL;
 
-static void bot_init(void) {
-    textBuf = C2D_TextBufNew(4096);
-}
-static void bot_free(void) {
-    if (textBuf) { C2D_TextBufDelete(textBuf); textBuf = NULL; }
-}
+static void bot_init(void) { textBuf = C2D_TextBufNew(4096); }
+static void bot_free(void) { if (textBuf) { C2D_TextBufDelete(textBuf); textBuf = NULL; } }
 
-/* Draw a string clipped within [clipX, clipX+clipW] at pixel (x,y).
-   Returns rendered width. */
-static float draw_text(const char *str, float x, float y, float z,
-                       float sz, u32 color) {
+static float draw_text(const char *str, float x, float y, float z, float sz, u32 color) {
     if (!str || !*str || !textBuf) return 0.0f;
     C2D_TextBufClear(textBuf);
     C2D_Text t;
@@ -533,9 +609,6 @@ static float draw_text(const char *str, float x, float y, float z,
     return w;
 }
 
-/*
- * measure_text_width: measure pixel width of a NUL-terminated string.
- */
 static float measure_text_width(const char *text, float sz) {
     if (!text || !*text || !textBuf) return 0.0f;
     C2D_TextBufClear(textBuf);
@@ -547,77 +620,47 @@ static float measure_text_width(const char *text, float sz) {
     return w;
 }
 
-/*
- * draw_wrapped_text:
- *   Draws `text` word-wrapped inside `maxPx` pixels starting at (x, y).
- *   Returns the Y position after the last line drawn.
- *   Never mutates the source string.
- */
 static float draw_wrapped_text(const char *text, float x, float startY,
                                float maxPx, float sz, u32 color) {
     if (!text || !*text || !textBuf) return startY;
-
-    /* line height derived from font size */
     float lineH = (sz >= 0.58f) ? 18.0f : (sz >= 0.50f ? 16.0f : 14.0f);
     float y = startY;
-
-    /* scratch buffer for a single line */
     char lineBuf[256];
-
     const char *p = text;
     while (*p) {
-        /* skip lone \r */
         while (*p == '\r') p++;
         if (!*p) break;
-
-        /* explicit newline → blank line */
         if (*p == '\n') { p++; y += lineH; continue; }
-
-        /* find the longest prefix of [p…] that fits in maxPx */
         const char *lineStart = p;
-        const char *lastSpace = NULL;   /* last space inside the fit range */
+        const char *lastSpace = NULL;
         const char *scan      = p;
-
         while (*scan && *scan != '\n') {
-            /* copy [lineStart..scan] into lineBuf for measurement */
             size_t len = (size_t)(scan - lineStart) + 1;
-            if (len >= sizeof(lineBuf)) { scan++; break; } /* safety */
+            if (len >= sizeof(lineBuf)) { scan++; break; }
             memcpy(lineBuf, lineStart, len);
             lineBuf[len] = '\0';
-
             float w = measure_text_width(lineBuf, sz);
             if (w > maxPx) {
-                /* this char doesn't fit — break before it */
                 if (lastSpace && lastSpace > lineStart) {
-                    scan = lastSpace; /* break at last space */
+                    scan = lastSpace;
                 }
-                /* else break right here (word longer than line) */
                 break;
             }
             if (*scan == ' ') lastSpace = scan;
             scan++;
         }
-
-        /* draw [lineStart .. scan) */
         size_t drawLen = (size_t)(scan - lineStart);
-        /* trim trailing spaces */
         while (drawLen > 0 && lineStart[drawLen - 1] == ' ') drawLen--;
-
         if (drawLen > 0 && drawLen < sizeof(lineBuf)) {
             memcpy(lineBuf, lineStart, drawLen);
             lineBuf[drawLen] = '\0';
             draw_text(lineBuf, x, y, 0.3f, sz, color);
         }
         y += lineH;
-
-        /* advance p past the chunk we just drew */
         p = scan;
-        /* skip the breaking space (but not a newline — handled top of loop) */
         if (*p == ' ') p++;
-        /* skip explicit newline */
         if (*p == '\n') { p++; }
     }
-
     return y;
 }
 
@@ -625,11 +668,8 @@ static void render_bottom(void) {
     C2D_SceneBegin(botTarget);
     C2D_TargetClear(botTarget, COL_BG);
 
-    /* sidebars */
     C2D_DrawRectSolid(0,               0, 0.1f, SIDEBAR_W,     BOT_H, COL_SIDEBAR);
     C2D_DrawRectSolid(BOT_W - SIDEBAR_W, 0, 0.1f, SIDEBAR_W,   BOT_H, COL_SIDEBAR);
-
-    /* white card */
     C2D_DrawRectSolid(SIDEBAR_W, 0, 0.1f, BOT_W - SIDEBAR_W * 2, BOT_H, COL_WHITE);
 
     const float TITLE_SZ = 0.60f;
@@ -638,17 +678,42 @@ static void render_bottom(void) {
     const int   LINE_H   = 18;
 
     switch (state) {
-    case STATE_MENU:
+    case STATE_PACK_SELECT: {
         draw_text("MSPA-3DS", TEXT_X_START, TITLE_Y, 0.3f, TITLE_SZ, COL_BLACK);
-        draw_text("SELECT A COMIC:", TEXT_X_START, BODY_Y_START + LINE_H * 1, 0.3f, BODY_SZ, COL_BLACK);
-        draw_text("> A: HOMESTUCK", TEXT_X_START, BODY_Y_START + LINE_H * 3, 0.3f, BODY_SZ, COL_BLACK);
-        if (resumeAvailable)
-            draw_text("> B: CONTINUE", TEXT_X_START, BODY_Y_START + LINE_H * 4, 0.3f, BODY_SZ, COL_BLACK);
-        else
-            draw_text("> B: NO SAVE", TEXT_X_START, BODY_Y_START + LINE_H * 4, 0.3f, BODY_SZ, COL_GREY);
-	draw_text("> X: TELEPORT TO PAGE", TEXT_X_START, BODY_Y_START + LINE_H * 5, 0.3f, BODY_SZ, COL_BLACK);
-        draw_text("> START: Quit", TEXT_X_START, BODY_Y_START + LINE_H * 7, 0.3f, BODY_SZ, COL_GREY);
+        float y = BODY_Y_START;
+        if (packCount == 0) {
+            draw_text("No packs found!", TEXT_X_START, y, 0.3f, BODY_SZ, COL_GREY);
+            y += LINE_H * 2;
+            draw_text("Place pack folders in:", TEXT_X_START, y, 0.3f, BODY_SZ, COL_GREY);
+            y += LINE_H;
+            draw_text("sdmc:/3ds/MSPA-3DS/packs/<name>/", TEXT_X_START, y, 0.3f, BODY_SZ, COL_GREY);
+        } else {
+            draw_text("SELECT A PACK:", TEXT_X_START, y, 0.3f, BODY_SZ, COL_BLACK);
+            y += LINE_H;
+            for (int i = 0; i < packCount && y < BODY_Y_END; i++) {
+                u32 col = (i == selectedPack) ? COL_BLUE : COL_BLACK;
+                const char *sel = (i == selectedPack) ? "> " : "  ";
+                char tmp[192];
+                snprintf(tmp, sizeof(tmp), "%s%s", sel, packs[i].title[0] ? packs[i].title : packs[i].packId);
+                draw_text(tmp, TEXT_X_START, y, 0.3f, BODY_SZ, col);
+                y += LINE_H;
+            }
+            y += LINE_H;
+            char info[128];
+            if (packs[selectedPack].pageCount > 0) {
+                snprintf(info, sizeof(info), "Pages: %d (%d-%d)",
+                         packs[selectedPack].pageCount,
+                         packs[selectedPack].firstPage,
+                         packs[selectedPack].lastPage);
+                draw_text(info, TEXT_X_START, y, 0.3f, BODY_SZ, COL_GREY);
+            }
+        }
+        y = BODY_Y_END - LINE_H * 2;
+        draw_text("> A: Select  UP/DN: Choose", TEXT_X_START, y, 0.3f, BODY_SZ, COL_GREY);
+        y += LINE_H;
+        draw_text("> START: Quit", TEXT_X_START, y, 0.3f, BODY_SZ, COL_GREY);
         break;
+    }
 
     case STATE_LOADING: {
         draw_text("LOADING", TEXT_X_START, TITLE_Y, 0.3f, TITLE_SZ, COL_BLACK);
@@ -668,100 +733,42 @@ static void render_bottom(void) {
     }
 
     case STATE_READING: {
-    const char *typeStr = (curPage.type && curPage.type[0]) ? curPage.type : "PAGE";
-    
-    float currentY = TITLE_Y;
-    // 1. Draw the Header (Not scrolled)
-    currentY = draw_wrapped_text(typeStr, TEXT_X_START, currentY, (float)TEXT_AVAIL_W, TITLE_SZ, COL_BLACK);
-
-    currentY += 8.0f;
-    
-    C2D_Flush(); 
-    
-    // Standard Citra/3DS Hardware Scissor logic for the bottom screen:
-    // We want to clip Y from BODY_Y_START to BODY_Y_END
-    // and X from SIDEBAR_W to (BOT_W - SIDEBAR_W)
-    // Because of the screen rotation, we map it like this:
-    int scissorX = BODY_Y_START;
-    int scissorY = SIDEBAR_W;
-    int scissorW = BODY_Y_END - BODY_Y_START;
-    int scissorH = BOT_W - (SIDEBAR_W * 2);
-    int clipTop = (int)currentY;
-    int clipBottom = BODY_Y_END;
-
-    C3D_SetScissor(GPU_SCISSOR_NORMAL, clipTop, SIDEBAR_W, clipBottom, BOT_W - SIDEBAR_W);
-
-    // 3. Draw text with the Y offset (subtracted by textScrollY)
-    float drawY = currentY - textScrollY;
-
-    for (size_t i = 0; i < curPage.textCount; i++) {
-        if (!curPage.text[i] || !curPage.text[i][0]) continue;
-        drawY = draw_wrapped_text(curPage.text[i], TEXT_X_START, drawY, (float)TEXT_AVAIL_W, BODY_SZ, COL_BLACK);
-        drawY += 4.0f;
-        // REMOVE the 'if (y > BODY_Y_END) break' so it calculates all lines
+        const char *typeStr = (curPage.type && curPage.type[0]) ? curPage.type : "PAGE";
+        float currentY = TITLE_Y;
+        currentY = draw_wrapped_text(typeStr, TEXT_X_START, currentY, (float)TEXT_AVAIL_W, TITLE_SZ, COL_BLACK);
+        currentY += 8.0f;
+        C2D_Flush();
+        int clipTop = (int)currentY;
+        C3D_SetScissor(GPU_SCISSOR_NORMAL, clipTop, SIDEBAR_W, BODY_Y_END, BOT_W - SIDEBAR_W);
+        float drawY = currentY - textScrollY;
+        for (size_t i = 0; i < curPage.textCount; i++) {
+            if (!curPage.text[i] || !curPage.text[i][0]) continue;
+            drawY = draw_wrapped_text(curPage.text[i], TEXT_X_START, drawY, (float)TEXT_AVAIL_W, BODY_SZ, COL_BLACK);
+            drawY += 4.0f;
+        }
+        if (curPage.command && curPage.command[0]) {
+            drawY += 2.0f;
+            drawY = draw_wrapped_text(curPage.command, TEXT_X_START, drawY, (float)TEXT_AVAIL_W, CMD_SZ, COL_BLUE);
+        }
+        C2D_Flush();
+        C3D_SetScissor(GPU_SCISSOR_DISABLE, 0, 0, 0, 0);
+        break;
     }
-
-    if (curPage.command && curPage.command[0]) {
-        drawY += 2.0f;
-        drawY = draw_wrapped_text(curPage.command, TEXT_X_START, drawY, (float)TEXT_AVAIL_W, CMD_SZ, COL_BLUE);
-    }
-
-    // 4. Reset Scissor
-    C2D_Flush();
-    C3D_SetScissor(GPU_SCISSOR_DISABLE, 0, 0, 0, 0);
-
-    break;
-}
     }
 
     needsRedraw = false;
     C3D_FrameEnd(0);
 }
 
-int read_resume_page() {
-    FILE* f = fopen("sdmc:/mspa/resume.txt", "r");
-    if (!f) return -1;
-
-    int p = -1;
-    if (fscanf(f, "%d", &p) != 1) {
-        p = -1;
-    }
-
-    fclose(f);
-    return p;
-}
-
-void save_resume_page(int page) {
-    // Create the directory just in case it doesn't exist
-    mkdir("sdmc:/mspa", 0777); 
-
-    FILE* f = fopen("sdmc:/mspa/resume.txt", "w");
-    if (f) {
-        fprintf(f, "%d", page);
-        fclose(f);
-        
-        // Update the globals so the menu reacts immediately
-        resumePage = page;
-        resumeAvailable = true;
-    }
-}
-
+/* ═══════════════════════════════════════════════════════════════════════
+ * MAIN
+ * ═══════════════════════════════════════════════════════════════════════ */
 
 int main(void) {
     gfxInitDefault();
     romfsInit();
 
     ensure_sd_dirs();
-
-    socBuf = (u32 *)memalign(SOC_ALIGN, SOC_BUFFERSIZE);
-    if (!socBuf || R_FAILED(socInit(socBuf, SOC_BUFFERSIZE))) {
-        printf("socInit failed\n");
-        goto done_gfx;
-    }
-    if (R_FAILED(httpcInit(0))) {
-        printf("httpcInit failed\n");
-        goto done_soc;
-    }
 
     C3D_Init(C3D_DEFAULT_CMDBUF_SIZE);
     C2D_Init(C2D_DEFAULT_MAX_OBJECTS);
@@ -771,56 +778,49 @@ int main(void) {
     bot_init();
     mspa_image_make_placeholder(&placeholder);
 
-    resumeAvailable = read_resume_page();
-	if (resumeAvailable) {
-    		resumePage = read_resume_page(); 
-	} else {
-    		resumePage = startPage;
-     }
+    /* Scan for packs on SD card */
+    packCount = mspa_bundle_scan_packs(packs, MAX_PACKS);
+
+    /* Load resume page */
+    {
+        FILE *f = fopen("sdmc:/mspa/resume.txt", "r");
+        if (f) {
+            if (fscanf(f, "%d", &resumePage) != 1) resumePage = 0;
+            fclose(f);
+        }
+    }
 
     while (aptMainLoop()) {
         hidScanInput();
         u32 kDown = hidKeysDown();
-        u32 kHeld = hidKeysHeld(); 
+        u32 kHeld = hidKeysHeld();
 
         if (kDown & KEY_START)
             break;
 
         if (!loadJob.active) {
             switch (state) {
-            case STATE_MENU:
-                if (kDown & KEY_A) {
-                    begin_page_load(startPage);
+            case STATE_PACK_SELECT:
+                if (packCount > 0) {
+                    if (kDown & KEY_UP) {
+                        selectedPack = (selectedPack - 1 + packCount) % packCount;
+                        needsRedraw = true;
+                    }
+                    if (kDown & KEY_DOWN) {
+                        selectedPack = (selectedPack + 1) % packCount;
+                        needsRedraw = true;
+                    }
+                    if (kDown & KEY_A) {
+                        /* Open the selected bundle */
+                        activeBundle = &packs[selectedPack];
+                        int startPage = activeBundle->firstPage;
+                        if (startPage <= 0) startPage = 1;
+                        begin_page_load(startPage, 0);
+                    }
                 }
-                if (resumeAvailable && (kDown & KEY_B)) {
-                    begin_page_load(resumePage);
-                }
-
-		if (kDown & KEY_X) {
-        static SwkbdState swkbd;
-        char inputBuf[10]; // Buffer for the page number string
-        
-        // Initialize the keyboard as a Numpad
-        swkbdInit(&swkbd, SWKBD_TYPE_NUMPAD, 1, 7); 
-        swkbdSetHintText(&swkbd, "Enter page number...");
-        
-        // Launch the keyboard (this is a blocking call)
-        SwkbdButton button = swkbdInputText(&swkbd, inputBuf, sizeof(inputBuf));
-        
-        // If the user didn't press 'Cancel'
-        if (button != SWKBD_BUTTON_NONE) {
-            int targetPage = atoi(inputBuf); // Convert string to integer
-            if (targetPage > 0) {
-                begin_page_load(targetPage);
-            }
-        }
-        needsRedraw = true; // Tell the engine to redraw the menu after the KB closes
-    }
-
                 break;
 
             case STATE_READING:
-                // Scrolling logic
                 if (kHeld & KEY_UP) {
                     textScrollY -= 4;
                     if (textScrollY < 0) textScrollY = 0;
@@ -829,34 +829,52 @@ int main(void) {
                 if (kHeld & KEY_DOWN) {
                     textScrollY += 4;
                     needsRedraw = true;
-                }  
-
-                // Navigation logic
-                if (kDown & KEY_A) {
-                    int nextPage = curPage.next;
-                    if (nextPage <= pageNum)
-                        nextPage = pageNum + 1;
-                    begin_page_load(nextPage);
-		    save_resume_page(pageNum);
                 }
-                if ((kDown & KEY_B) && pageNum > startPage) {
-                    begin_page_load(pageNum - 1);
+
+                if (kDown & KEY_A) {
+                    if (curPage.mediaCount > 1 && curMediaIndex + 1 < (int)curPage.mediaCount) {
+                        begin_page_load(pageNum, curMediaIndex + 1);
+                    } else {
+                        int nextPage = curPage.next;
+                        if (nextPage <= pageNum)
+                            nextPage = pageNum + 1;
+                        begin_page_load(nextPage, 0);
+                    }
+                }
+                if (kDown & KEY_B) {
+                    if (curPage.mediaCount > 1 && curMediaIndex > 0) {
+                        begin_page_load(pageNum, curMediaIndex - 1);
+                    } else if (pageNum > 1) {
+                        begin_page_load(pageNum - 1, 0);
+                    }
                 }
                 if (kDown & KEY_X) {
+                    mspa_audio_close(&curAudio);
                     panel_anim_free();
-                    state = STATE_MENU;
+                    load_job_reset();
+                    if (activeBundle) {
+                        mspa_bundle_close(activeBundle);
+                        activeBundle = NULL;
+                    }
+                    /* Re-scan packs (in case user added new ones) */
+                    for (int i = 0; i < packCount; i++)
+                        mspa_bundle_close(&packs[i]);
+                    packCount = mspa_bundle_scan_packs(packs, MAX_PACKS);
+                    selectedPack = 0;
+                    state = STATE_PACK_SELECT;
                     needsRedraw = true;
                 }
-                break; // This closes STATE_READING
+                break;
 
             case STATE_LOADING:
                 break;
-            } // This closes the switch(state)
-        } // This closes the if(!loadJob.active)
+            }
+        }
 
         if (loadJob.active) {
             advance_load_job();
         } else {
+            if (curAudio.active) mspa_audio_tick(&curAudio);
             panel_anim_tick();
         }
 
@@ -868,17 +886,13 @@ int main(void) {
     mspa_image_free(&placeholder);
     mspa_page_free(&curPage);
     panel_anim_free();
+    mspa_audio_close(&curAudio);
     load_job_reset();
+    if (activeBundle) mspa_bundle_close(activeBundle);
+    for (int i = 0; i < packCount; i++) mspa_bundle_close(&packs[i]);
     bot_free();
     C2D_Fini();
     C3D_Fini();
-    httpcExit();
-
-done_soc:
-    socExit();
-    if (socBuf) { free(socBuf); socBuf = NULL; }
-
-done_gfx:
     romfsExit();
     gfxExit();
     return 0;

@@ -81,11 +81,11 @@ GPU_RGBA8 = 0
 # Known comics on the mspa.chadthundercock.com mirror
 # slug = URL path segment, offset = global page number offset
 # For Homestuck, internal page 1 = global page 1901
+# Note: Bard Quest is excluded (branching narrative with multiple next-links)
+# Note: Homestuck Beta is excluded (flash-only, no static images)
 COMICS = {
     "jailbreak":       {"name": "Jailbreak",              "offset": 0},
-    "bard-quest":      {"name": "Bard Quest",             "offset": 0},
     "problemsleuth":   {"name": "Problem Sleuth",         "offset": 0},
-    "beta":            {"name": "Homestuck Beta",          "offset": 0},
     "homestuck":       {"name": "Homestuck",              "offset": 1900},
 }
 
@@ -871,7 +871,7 @@ class MspaBuilderApp:
         ttk.Label(src_frame, textvariable=self.comic_info_var,
                   font=("Segoe UI", 9, "italic")).pack(anchor=tk.W)
 
-        ttk.Label(src_frame, text="Examples: homestuck, jailbreak, problemsleuth, bard-quest, beta",
+        ttk.Label(src_frame, text="Examples: homestuck, jailbreak, problemsleuth",
                   font=("Segoe UI", 8)).pack(anchor=tk.W, pady=(2, 0))
         ttk.Label(src_frame, text="Or paste a full URL: https://mspa.chadthundercock.com/jailbreak/1",
                   font=("Segoe UI", 8)).pack(anchor=tk.W)

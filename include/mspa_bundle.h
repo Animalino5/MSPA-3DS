@@ -67,3 +67,11 @@ bool mspa_bundle_ensure_page_json(MspaBundle *bundle, int globalPage,
  * just verifies the source exists. Returns true if the file is accessible. */
 bool mspa_bundle_ensure_media(MspaBundle *bundle, const char *relativePath,
                                const char *destPath);
+
+/* Read the last-read page from <folderPath>/bookmark.txt.
+ * Returns the saved page number, or -1 if no bookmark exists. */
+int mspa_bundle_read_bookmark(MspaBundle *bundle);
+
+/* Save the current page number to <folderPath>/bookmark.txt.
+ * Returns true on success. */
+bool mspa_bundle_save_bookmark(MspaBundle *bundle, int pageNum);

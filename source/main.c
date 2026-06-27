@@ -90,7 +90,7 @@ static int               curMediaIndex = 0;
 static LoadJob           loadJob      = {0};
 static PanelAnimation    curAnim      = {0};
 static int               textScrollY  = 0;
-static int               resumePage   = 0;
+/* resumePage removed — now using per-pack bookmark.txt */
 
 /* Pack selection */
 #define MAX_PACKS 32
@@ -329,11 +329,10 @@ static void commit_loaded_page(void) {
         }
     }
 
-    /* Save resume point */
-    mkdir("sdmc:/mspa", 0777);
-    FILE *rf = fopen("sdmc:/mspa/resume.txt", "w");
-    if (rf) { fprintf(rf, "%d", pageNum); fclose(rf); }
-    resumePage = pageNum;
+    /* Save per-pack bookmark */
+    if (activeBundle) {
+        mspa_bundle_save_bookmark(activeBundle, pageNum);
+    }
 
     pageLoadedOk = true;
     state = STATE_READING;
@@ -781,14 +780,7 @@ int main(void) {
     /* Scan for packs on SD card */
     packCount = mspa_bundle_scan_packs(packs, MAX_PACKS);
 
-    /* Load resume page */
-    {
-        FILE *f = fopen("sdmc:/mspa/resume.txt", "r");
-        if (f) {
-            if (fscanf(f, "%d", &resumePage) != 1) resumePage = 0;
-            fclose(f);
-        }
-    }
+    /* Global resume removed — each pack now has its own bookmark.txt */
 
     while (aptMainLoop()) {
         hidScanInput();
@@ -815,6 +807,12 @@ int main(void) {
                         activeBundle = &packs[selectedPack];
                         int startPage = activeBundle->firstPage;
                         if (startPage <= 0) startPage = 1;
+                        /* Resume from bookmark if available */
+                        int bookmark = mspa_bundle_read_bookmark(activeBundle);
+                        if (bookmark >= activeBundle->firstPage &&
+                            bookmark <= activeBundle->lastPage) {
+                            startPage = bookmark;
+                        }
                         begin_page_load(startPage, 0);
                     }
                 }

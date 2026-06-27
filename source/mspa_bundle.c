@@ -299,3 +299,35 @@ bool mspa_bundle_ensure_media(MspaBundle *bundle, const char *relativePath,
     fclose(dst);
     return true;
 }
+
+/* ═══════════════════════════════════════════════════════════════════════
+ * Per-pack bookmark (last-read page)
+ * ═══════════════════════════════════════════════════════════════════════ */
+
+int mspa_bundle_read_bookmark(MspaBundle *bundle) {
+    if (!bundle || bundle->folderPath[0] == '\0') return -1;
+
+    char path[320];
+    snprintf(path, sizeof(path), "%s/bookmark.txt", bundle->folderPath);
+
+    FILE *f = fopen(path, "r");
+    if (!f) return -1;
+
+    int page = -1;
+    if (fscanf(f, "%d", &page) != 1) page = -1;
+    fclose(f);
+    return page;
+}
+
+bool mspa_bundle_save_bookmark(MspaBundle *bundle, int pageNum) {
+    if (!bundle || bundle->folderPath[0] == '\0') return false;
+
+    char path[320];
+    snprintf(path, sizeof(path), "%s/bookmark.txt", bundle->folderPath);
+
+    FILE *f = fopen(path, "w");
+    if (!f) return false;
+    fprintf(f, "%d", pageNum);
+    fclose(f);
+    return true;
+}

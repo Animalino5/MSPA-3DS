@@ -48,9 +48,8 @@ The builder handles everything:
 
 ### 3DS App
 
-1. Download `MSPA-3DS.3dsx` and `MSPA-3DS.cia` from the [latest release](../../releases)
-2. **CIA install**: install `MSPA-3DS.cia` via FBI or your preferred CIA installer
-3. **3DSX install**: copy `MSPA-3DS.3dsx` to `/3ds/MSPA-3DS/` on your SD card
+1. Download `MSPA-3DS.3dsx` from the [latest release](../../releases)
+3. copy `MSPA-3DS.3dsx` to `/3ds/MSPA-3DS/` on your SD card
 
 ### Bundle Builder (PC)
 

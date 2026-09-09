@@ -55,20 +55,6 @@ The builder handles everything:
 
 Download `MSPA-3DS-Builder.exe` from the [latest release](../../releases), it's a standalone executable, no Python needed.
 
-**Or run from source:**
-
-Requirements:
-- Python 3.8+
-- `pip install requests beautifulsoup4 Pillow yt-dlp`
-- **ffmpeg** (required for video/audio conversion — install via your package manager)
-- **Java** (required for SWF/Flash conversion — install JRE 11+)
-- **yt-dlp** (for YouTube videos — installed via pip above)
-- FFDec is auto-downloaded on first run, no manual install needed
-
-```bash
-python build_gui.py
-```
-
 ## Transferring bundles to your 3DS
 
 After building a pack, copy its folder to:
@@ -101,7 +87,7 @@ packs/
 |------|-------------|
 | `.tex` | 3DS GPU texture (format 0x80 = untiled RGBA, format 0x00 = GPU-tiled) |
 | `.anim` | Animation manifest: frame count + per-frame delays (ms) |
-| `.wav` | PCM audio (44100Hz stereo) for `[S]` pages |
+| `.wav` | PCM audio for `[S]` pages |
 | `.gif` | Original GIF (fallback for on-device conversion) |
 | `.json` | Page metadata (command, text, media references, next page) |
 | `manifest.json` | Pack metadata (title, page range, schema version) |
@@ -121,12 +107,12 @@ packs/
 
 ### MSPA Mirror (MSPA To Go)
 - **Static images** (GIF/PNG/JPEG) → converted to `.tex` textures
-- **Flash `[S]` pages** → SWF extracted via FFDec → frame sequences at 6 FPS + WAV audio
+- **Flash `[S]` pages** → SWF extracted via Ruffle → frame sequences at 6 FPS + WAV audio
 - **Multi-image pages** → split into separate sub-pages
 
 ### MSPFA (fan adventures)
 - **`[img]` tags** → converted to `.tex` textures
-- **`[flash]` tags** → SWF extracted via FFDec → frame sequences
+- **`[flash]` tags** → SWF extracted via Ruffle → frame sequences
 - **YouTube embeds** (`<iframe>`) → downloaded via yt-dlp → frame sequences
 - **Direct video** (`<video>` tags, MP4/WebM) → downloaded and converted via ffmpeg
 - **`@mspfa audio` CSS** → audio downloaded and resampled to WAV
@@ -134,20 +120,11 @@ packs/
 ## Limitations
 
 - `[S]` pages are converted to 6 FPS frame sequences. Smooth but not full video quality.
-- Interactive Flash pages (with ActionScript games) may not convert correctly. FFDec can only extract timeline animations, not interactive content.
+- Interactive Flash pages (with ActionScript games) may not convert correctly. Ruffle can only extract timeline animations, not interactive content.
 - Audio for `[S]` pages is extracted from the source; some pages may have audio sync issues.
 - No internet connectivity from the 3DS. all content must be pre-built on PC.
 - Very long animations may use significant SD card space (~1MB per 10 seconds at 6 FPS).
-
-## Dependencies
-
-The Bundle Builder depends on:
-- **Python 3.8+** with `requests`, `beautifulsoup4`, `Pillow`, `yt-dlp`
-- **ffmpeg** — video/audio conversion (system install)
-- **Java JRE 11+** — runs FFDec for SWF conversion (system install)
-- **FFDec** — JPEXS Free Flash Decompiler, auto-downloaded on first run
-- **yt-dlp** — YouTube video downloading (pip install)
-
+- 
 ## License
 
-This project is open source. The Homestuck webcomic and all MSPA/MSPFA content belong to their respective creators. FFDec is © JPEX and is distributed under its own license.
+This project is open source. The Homestuck webcomic and all MSPA/MSPFA content belong to their respective creators.

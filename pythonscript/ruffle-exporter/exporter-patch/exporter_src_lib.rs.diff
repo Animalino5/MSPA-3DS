@@ -1,0 +1,228 @@
+--- a/exporter/src/lib.rs
++++ b/exporter/src/lib.rs
+@@ -16,6 +16,117 @@
+ use crate::exporter::Exporter;
+ use crate::progress::ExporterProgress;
+ 
++/// Which source-frame indices should be captured (and written to disk).
++#[derive(Debug, Clone)]
++enum CapturePlan {
++    /// Capture every frame from `skipframes` onward (streamed to disk).
++    /// `total` of `None` means "all frames" (use the movie header count).
++    From {
++        skipframes: u32,
++        total: Option<u32>,
++    },
++    /// Capture only the given indices; simulate from 0 up to the last index.
++    Indices {
++        indices: Vec<u32>,
++    },
++}
++
++impl CapturePlan {
++    fn should_capture(&self, i: u32) -> bool {
++        match self {
++            CapturePlan::From { skipframes, .. } => i >= *skipframes,
++            CapturePlan::Indices { indices, .. } => indices.binary_search(&i).is_ok(),
++        }
++    }
++
++}
++
++/// Parse a comma/whitespace-separated list of frame indices ("0,4,8,12").
++fn parse_frame_indices(spec: &str) -> Result<Vec<u32>> {
++    let mut indices = Vec::new();
++    for part in spec.split([',', '\n', '\r', ' ', '\t']) {
++        let part = part.trim();
++        if part.is_empty() {
++            continue;
++        }
++        let n: u32 = part
++            .parse()
++            .map_err(|e| anyhow!("Invalid frame index {part:?} in --frame-indices: {e}"))?;
++        if !indices.contains(&n) {
++            indices.push(n);
++        }
++    }
++    if indices.is_empty() {
++        return Err(anyhow!("--frame-indices produced no indices to capture"));
++    }
++    indices.sort_unstable();
++    Ok(indices)
++}
++
++/// Captures frames and streams them to disk as PNGs as they are rendered.
++///
++/// Unlike the original exporter (which accumulated every frame in memory and
++/// only wrote them at the end — OOMing on long movies), this writes each
++/// captured PNG immediately, keeping memory usage constant.
++///
++/// Files are named by their SOURCE frame index: `<output>/<index:0N>.png`,
++/// where N is the number of digits of the highest captured index.
++///
++/// Returns the number of frames written.
++fn take_screenshot_streaming(
++    exporter: &Exporter,
++    swf_path: &Path,
++    plan: &CapturePlan,
++    output_dir: &Path,
++    progress: &ExporterProgress,
++) -> Result<usize> {
++    let movie_export = exporter.start_exporting_movie(swf_path)?;
++
++    let totalframes = match plan {
++        CapturePlan::From {
++            total: Some(total),
++            ..
++        } => *total,
++        CapturePlan::From { total: None, .. } => movie_export.total_frames(),
++        CapturePlan::Indices { indices } => indices.last().copied().unwrap_or(0) + 1,
++    };
++    let digits = totalframes.to_string().len();
++
++    let mut written = 0usize;
++    for i in 0..totalframes {
++        progress.set_message(format!(
++            "{} frame {}",
++            swf_path.file_stem().unwrap().to_string_lossy(),
++            i
++        ));
++
++        movie_export.run_frame();
++
++        if plan.should_capture(i) {
++            match movie_export.capture_frame() {
++                Ok(image) => {
++                    let path = output_dir.join(format!("{i:0digits$}.png"));
++                    image.save(&path).map_err(|e| {
++                        anyhow!("Unable to write frame {i} to {}: {e}", path.display())
++                    })?;
++                    written += 1;
++                }
++                Err(e) => {
++                    return Err(anyhow!(
++                        "Unable to capture frame {} of {:?}: {:?}",
++                        i,
++                        swf_path,
++                        e
++                    ));
++                }
++            }
++        }
++
++        progress.inc(1);
++    }
++    Ok(written)
++}
++
+ /// Captures a screenshot. The resulting image uses straight alpha
+ fn take_screenshot(
+     exporter: &Exporter,
+@@ -90,6 +201,40 @@
+ }
+ 
+ fn capture_single_swf(exporter: &Exporter, opt: &Opt) -> Result<()> {
++    let progress = ExporterProgress::new(opt, 1);
++
++    // Frame indices mode: stream only the requested frames to disk,
++    // named by their source frame index.
++    let indices_spec = if let Some(file) = &opt.frame_indices_file {
++        std::fs::read_to_string(file)
++            .map_err(|e| anyhow!("Unable to read --frame-indices-file {}: {e}", file.display()))?
++    } else if let Some(spec) = &opt.frame_indices {
++        spec.clone()
++    } else {
++        String::new()
++    };
++
++    if !indices_spec.is_empty() {
++        let output = opt
++            .output_path
++            .clone()
++            .unwrap_or_else(|| PathBuf::from(opt.swf.file_stem().unwrap()));
++        create_dir_all(&output)?;
++
++        let indices = parse_frame_indices(&indices_spec)?;
++        let expected = indices.len();
++        let plan = CapturePlan::Indices { indices };
++
++        let written = take_screenshot_streaming(exporter, &opt.swf, &plan, &output, &progress)?;
++
++        progress.finish_with_message(format!(
++            "Saved {written}/{expected} requested frames of {} to {}",
++            opt.swf.to_string_lossy(),
++            output.to_string_lossy()
++        ));
++        return Ok(());
++    }
++
+     let is_single_frame = opt.frames.is_single_frame();
+     let output = opt.output_path.clone().unwrap_or_else(|| {
+         let mut result = PathBuf::new();
+@@ -102,9 +247,25 @@
+ 
+     if !is_single_frame {
+         let _ = create_dir_all(&output);
+-    }
++        // Multi-frame: stream frames to disk as they are rendered instead of
++        // accumulating the whole movie in memory (which OOMs on long SWFs).
++        let total = match opt.frames {
++            FrameSelection::All => None,
++            FrameSelection::Count(n) => Some(n.get() + opt.skipframes),
++        };
++        let plan = CapturePlan::From {
++            skipframes: opt.skipframes,
++            total,
++        };
++        let written = take_screenshot_streaming(exporter, &opt.swf, &plan, &output, &progress)?;
+ 
+-    let progress = ExporterProgress::new(opt, 1);
++        progress.finish_with_message(format!(
++            "Saved {written} frames of {} to {}",
++            opt.swf.to_string_lossy(),
++            output.to_string_lossy()
++        ));
++        return Ok(());
++    }
+ 
+     let frames = take_screenshot(exporter, &opt.swf, opt.frames, opt.skipframes, &progress)?;
+ 
+@@ -121,14 +282,16 @@
+                 .write_all(bytes.as_slice())
+                 .expect("Writing to stdout failed");
+         } else {
+-            image.save(&output)?;
+-        }
+-    } else {
+-        let digits = frames.len().to_string().len();
+-        for (frame, image) in frames.iter().enumerate() {
+-            let mut path: PathBuf = (&output).into();
+-            path.push(format!("{frame:0digits$}.png"));
+-            image.save(&path)?;
++            // If the output path has no image extension, treat it as a
++            // directory and write "0.png" inside it (the image crate cannot
++            // infer a format from an extension-less path).
++            let target = if output.extension().is_none() {
++                let _ = create_dir_all(&output);
++                output.join("0.png")
++            } else {
++                output.clone()
++            };
++            image.save(&target)?;
+         }
+     }
+ 
+@@ -143,12 +306,7 @@
+             None
+         }
+     } else {
+-        Some(format!(
+-            "Saved first {} frames of {} to {}",
+-            frames.len(),
+-            opt.swf.to_string_lossy(),
+-            output.to_string_lossy()
+-        ))
++        unreachable!("multi-frame export handled by streaming path")
+     };
+ 
+     if let Some(message) = message {

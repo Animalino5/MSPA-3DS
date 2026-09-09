@@ -6,6 +6,7 @@
 typedef struct {
     int page;
     int next;
+    int prev;   /* previous page (BACK button target); 0 = none, -1 = field absent */
     char *type;
     char *alt;
     char *command;

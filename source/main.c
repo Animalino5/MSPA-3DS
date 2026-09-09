@@ -99,6 +99,17 @@ static int               packCount    = 0;
 static int               selectedPack = 0;
 static MspaBundle       *activeBundle = NULL;  /* currently open bundle */
 
+/* ── BACK button (stateless — see find_previous_page) ──────────────────
+ * Virtual page numbers are not contiguous: MSPA-mirror bundles number
+ * pages global_page*100 (e.g. 197700, 197800 …), so the old BACK logic
+ * (pageNum - 1) NEVER hit an existing page — pressing B always failed and
+ * left the placeholder cube + stale text on screen. B is now the exact
+ * mirror of the ADVANCE key: the target page is derived from the bundle
+ * itself (the page's "prev" field, else a scan of the pack folder for
+ * the highest existing page below ours). No visit history is kept — any
+ * history-based approach breaks right after loading a pack at its
+ * bookmarked page, because nothing has been visited yet in that session. */
+
 /* ═══════════════════════════════════════════════════════════════════════
  * HELPERS
  * ═══════════════════════════════════════════════════════════════════════ */
@@ -246,6 +257,39 @@ static bool resize_rgba_nearest(const uint8_t *src, int sw, int sh,
     *dwOut = dw;
     *dhOut = dh;
     return true;
+}
+
+/* ── BACK button target lookup ──────────────────────────────────────────
+ * The ADVANCE key uses the page's "next" field and falls back to
+ * pageNum + 1 when it is invalid. This is the same idea, mirrored
+ * backwards, with a bundle-side scan so it also works on OLD bundles
+ * whose page JSONs carry no "prev" field:
+ *   1. probe pageNum-1   (MSPFA numbering: vpages are contiguous)
+ *   2. probe pageNum-100 (MSPA-mirror numbering: vpage = global_page*100)
+ *   3. walk downwards    (any hole size / mixed numbering, capped)
+ * Returns the highest existing page number below 'from', or 0 when no
+ * page below exists (first page — caller stays put). */
+#define PREV_SCAN_BUDGET 4096   /* max missed probes per BACK press */
+
+static int find_previous_page(int from) {
+    if (!activeBundle || from <= activeBundle->firstPage) return 0;
+
+    char path[256];
+    static const int fastSteps[2] = { 1, 100 };
+    for (int i = 0; i < 2; i++) {
+        int cand = from - fastSteps[i];
+        if (cand > 0 && cand >= activeBundle->firstPage &&
+            mspa_bundle_get_page_json_path(activeBundle, cand, path, sizeof(path)))
+            return cand;
+    }
+
+    int budget = PREV_SCAN_BUDGET;
+    for (int cand = from - 1; cand > 0 && cand >= activeBundle->firstPage; cand--) {
+        if (mspa_bundle_get_page_json_path(activeBundle, cand, path, sizeof(path)))
+            return cand;
+        if (--budget <= 0) break;
+    }
+    return 0;
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
@@ -450,7 +494,17 @@ static void advance_load_job(void) {
                 loadJob.stage = LOAD_FAIL;
             }
         } else {
-            loadJob.stage = LOAD_COMMIT;
+            /* Audio-only page (no media): music pages must still load
+             * their audio! The old code jumped straight to LOAD_COMMIT,
+             * so audio NEVER played on pages without images. */
+            loadJob.hasAudio = (loadJob.page.audio && loadJob.page.audio[0]);
+            if (loadJob.hasAudio) {
+                snprintf(loadJob.audioPath, sizeof(loadJob.audioPath),
+                         "%s/%s", activeBundle->folderPath, loadJob.page.audio);
+                loadJob.stage = LOAD_AUDIO_READ;
+            } else {
+                loadJob.stage = LOAD_COMMIT;
+            }
         }
         break;
     }
@@ -842,8 +896,26 @@ int main(void) {
                 if (kDown & KEY_B) {
                     if (curPage.mediaCount > 1 && curMediaIndex > 0) {
                         begin_page_load(pageNum, curMediaIndex - 1);
-                    } else if (pageNum > 1) {
-                        begin_page_load(pageNum - 1, 0);
+                    } else {
+                        /* BACK = the ADVANCE code, mirrored. Compare:
+                         *   ADVANCE:  int nextPage = curPage.next;
+                         *             if (nextPage <= pageNum)
+                         *                 nextPage = pageNum + 1;
+                         *   BACK:     int backPage = curPage.prev;
+                         *             if (backPage <= 0 || backPage >= pageNum)
+                         *                 backPage = find_previous_page(pageNum);
+                         * Deriving the target from the bundle itself means
+                         * BACK works even right after loading a pack at its
+                         * bookmarked page — no session memory needed.
+                         *   prev > 0   → new bundles (tool writes prev)
+                         *   prev == 0  → tool says "first page" (stay put)
+                         *   prev == -1 → old bundle → bundle-side scan */
+                        int backPage = curPage.prev;
+                        if (backPage <= 0 || backPage >= pageNum)
+                            backPage = find_previous_page(pageNum);
+                        if (backPage > 0)
+                            begin_page_load(backPage, 0);
+                        /* backPage == 0: no page below us — stay put */
                     }
                 }
                 if (kDown & KEY_X) {

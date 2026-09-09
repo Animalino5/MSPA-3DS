@@ -141,6 +141,10 @@ bool parse_page_json(const char *json, MspaPage *out) {
 
     temp.page = parse_int_value(json, "page", 0);
     temp.next = parse_int_value(json, "next", 0);
+    /* "prev": previous page for the BACK button. Default -1 lets main.c
+     * distinguish "field absent" (legacy bundle: fall back to pageNum-1)
+     * from 0 ("first page, no previous"). */
+    temp.prev = parse_int_value(json, "prev", -1);
     temp.type = parse_string_value(json, "type");
     temp.alt = parse_string_value(json, "alt");
     temp.command = parse_string_value(json, "command");

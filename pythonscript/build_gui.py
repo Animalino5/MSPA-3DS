@@ -16,7 +16,9 @@ When frozen, tools are searched next to the .exe first (portable
 then next to this script - see _is_frozen/_app_dirs/_tool_install_dir.
 
 Requires: pip install requests beautifulsoup4 Pillow
-Optional: ffmpeg (for [S] page video conversion)
+Optional: ffmpeg (for [S] page video conversion). A bundled ffmpeg.exe
+(beside the .exe or in the --add-data payload) is found automatically -
+see _find_ffmpeg.
 """
 
 import os
@@ -76,7 +78,7 @@ from tkinter import ttk, filedialog, messagebox
 # When this script is frozen with PyInstaller --onefile, __file__ points
 # into a TEMPORARY extraction dir (sys._MEIPASS) that is deleted when the
 # app exits. Read-only payloads added via --add-data live there, but
-# anything we INSTALL at runtime (the ruffle build, the ffdec download)
+# anything we INSTALL at runtime (the ruffle build)
 # must persist. Tool lookup therefore searches, in order:
 #   1. the directory containing the .exe  ("tools beside the exe" layout)
 #   2. sys._MEIPASS                       (payload bundled with --add-data)
@@ -108,7 +110,7 @@ def _app_dirs():
     return out
 
 def _tool_install_dir():
-    """Directory where runtime installs (ruffle build, ffdec download)
+    """Directory where runtime installs (the ruffle build)
     are persisted - must be writable and survive a restart."""
     if _is_frozen():
         try:
@@ -271,8 +273,26 @@ def parse_mspfa_url(url_or_id):
     return story_id, page_num
 
 # Detect external tools
-HAS_FFMPEG = shutil.which("ffmpeg") is not None
-HAS_JAVA = shutil.which("java") is not None
+def _find_ffmpeg():
+    """Find the ffmpeg executable.
+
+    Order: system PATH (shutil.which - also resolves ffmpeg.exe on
+    Windows) → beside the .exe / bundled payload / beside this script
+    (ffmpeg.exe on Windows, ffmpeg elsewhere). This is what makes a
+    PyInstaller-bundled ffmpeg.exe work in the frozen build.
+    """
+    path = shutil.which("ffmpeg")
+    if path:
+        return path
+    exe = "ffmpeg.exe" if os.name == "nt" else "ffmpeg"
+    for d in _app_dirs():
+        cand = os.path.join(d, exe)
+        if os.path.isfile(cand):
+            return cand
+    return None
+
+FFMPEG_PATH = _find_ffmpeg()
+HAS_FFMPEG = FFMPEG_PATH is not None
 
 def _find_yt_dlp():
     """Find yt-dlp executable."""
@@ -300,126 +320,14 @@ YT_DLP_PATH = _find_yt_dlp()
 _YT_DLP_VERSION_CACHE = None  # filled by _yt_dlp_version()
 HAS_YT_DLP = YT_DLP_PATH is not None
 
-def _find_ffdec():
-    """Find FFDec (JPEXS Free Flash Decompiler) installation.
-    
-    Looks for a directory containing ffdec.jar + lib/ subdirectory.
-    Returns (jar_path, lib_dir) or (None, None).
-    """
-    env_path = os.environ.get("FFDEC_PATH")
-    if env_path and os.path.isfile(env_path):
-        env_dir = os.path.dirname(env_path)
-        env_lib = os.path.join(env_dir, "lib")
-        if os.path.isdir(env_lib):
-            return env_path, env_lib
-    
-    search_dirs = []
-    for d in _app_dirs():
-        search_dirs.append(d)
-        search_dirs.append(os.path.join(d, "ffdec"))
-    search_dirs += [
-        "/usr/share/ffdec",
-        "/usr/local/share/ffdec",
-        os.path.expanduser("~/ffdec"),
-    ]
-    
-    for d in search_dirs:
-        gui_path = os.path.join(d, "ffdec.jar")
-        lib_dir = os.path.join(d, "lib")
-        if os.path.isfile(gui_path) and os.path.isdir(lib_dir):
-            return gui_path, lib_dir
-    
-    if shutil.which("ffdec"):
-        return "ffdec", None
-    
-    return None, None
-
-def _test_ffdec(jar_path):
-    """Test if FFDec can actually run. Returns True if it works."""
-    if not HAS_JAVA or not jar_path or jar_path == "ffdec":
-        return bool(jar_path)
-    try:
-        result = subprocess.run(
-            ["java", "-jar", jar_path, "-help"],
-            capture_output=True, timeout=15,
-            cwd=os.path.dirname(jar_path)
-        )
-        # FFDec -help returns 0 and prints usage to stdout
-        return result.returncode == 0 and b"JPEXS" in result.stdout
-    except Exception:
-        return False
-
-def _download_ffdec():
-    """Download FFDec from GitHub releases and extract it.
-    
-    Downloads to <script_dir>/ffdec/ and returns (jar_path, lib_dir).
-    Returns (None, None) on failure.
-    """
-    import zipfile, io
-    
-    version = "22.0.1"
-    url = f"https://github.com/jindrapetrik/jpexs-decompiler/releases/download/version{version}/ffdec_{version}.zip"
-    
-    target_dir = os.path.join(_tool_install_dir(), "ffdec")
-    
-    try:
-        resp = requests.get(url, timeout=120, stream=True)
-        if resp.status_code != 200:
-            return None, None
-        
-        # Read all content
-        content = resp.content
-        
-        # Extract zip to target directory
-        os.makedirs(target_dir, exist_ok=True)
-        with zipfile.ZipFile(io.BytesIO(content)) as z:
-            z.extractall(target_dir)
-        
-        jar_path = os.path.join(target_dir, "ffdec.jar")
-        lib_dir = os.path.join(target_dir, "lib")
-        
-        if os.path.isfile(jar_path) and os.path.isdir(lib_dir):
-            return jar_path, lib_dir
-    except Exception:
-        pass
-    
-    return None, None
-
-def _ensure_ffdec():
-    """Ensure FFDec is available and working.
-    
-    1. Try to find it locally
-    2. Test if it actually works
-    3. If not, download from GitHub
-    4. Test again
-    
-    Returns (jar_path, lib_dir) or (None, None).
-    """
-    # Try local first
-    jar, lib = _find_ffdec()
-    if jar and jar != "ffdec":
-        if _test_ffdec(jar):
-            return jar, lib
-    
-    # Download from GitHub
-    jar, lib = _download_ffdec()
-    if jar and _test_ffdec(jar):
-        return jar, lib
-    
-    return None, None
-
-FFDEC_JAR, FFDEC_LIB = _ensure_ffdec()
-HAS_FFDEC = HAS_JAVA and FFDEC_JAR is not None
-
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# RUFFLE EXPORTER (primary SWF renderer — modern replacement for FFDec)
-# ═══════════════════════════════════════════════════════════════════════════════
-# FFDec's Java renderer chokes on long flashes (e.g. [S] Make her pay:
-# 5558 frames @ 25fps → monolithic run takes >10 min, hits the timeout,
-# accumulates memory and gets slower over time). Ruffle's exporter is a
-# headless wgpu renderer with correct AVM1/AVM2 emulation that renders the
-# same movie in ~20 seconds.
+# RUFFLE EXPORTER (the SWF renderer)
+# ═════════════════════════════════════════════════════════════════════════════
+# Ruffle's exporter is a headless wgpu renderer with correct AVM1/AVM2
+# emulation: thousands of frames per second, constant memory, and correct
+# playback of long flashes (e.g. [S] Make her pay: 5558 frames @ 25fps
+# rendered in ~20 seconds).
 #
 # No official prebuilt exporter binaries are published, so we look for one
 # next to the script (ruffle-exporter/), on PATH, or via $RUFFLE_EXPORTER_PATH.
@@ -772,8 +680,8 @@ def _ensure_ruffle():
     """Find a working ruffle_exporter, building from source if allowed.
 
     Returns (path_or_None, graphics_args_list).
-    Auto-build happens when RUFFLE_AUTO_BUILD=1 is set, or when neither
-    Ruffle nor FFDec is available (so the tool remains self-sufficient).
+    Auto-build happens when RUFFLE_AUTO_BUILD=1 is set, or when no
+    Ruffle is available (so the tool remains self-sufficient).
     """
     path = _find_ruffle()
     if path:
@@ -781,7 +689,7 @@ def _ensure_ruffle():
         if backend is not None:
             return path, backend
 
-    if RUFFLE_AUTO_BUILD or (path is None and not HAS_FFDEC):
+    if RUFFLE_AUTO_BUILD or path is None:
         path = _build_ruffle()
         if path:
             backend = _test_ruffle(path)
@@ -982,7 +890,7 @@ def extract_media_urls(soup, global_page, html, comic_slug):
     if looks_like_flash(html):
         # [S] page: try to find SWF URL in the HTML first
         swf_urls = find_swf_urls(html)
-        if swf_urls and (HAS_RUFFLE or HAS_FFDEC):
+        if swf_urls and HAS_RUFFLE:
             return swf_urls[:1], True  # Use the first SWF found
         # Fall back to pre-converted MP4 from archive
         return [f"{FLASH_MP4_BASE}{global_page:06d}.mp4"], True
@@ -1102,7 +1010,7 @@ def mspfa_parse_images(body):
     
     Returns (urls, media_type) where media_type is one of:
       'image'  — static image, use convert_gif_to_tex
-      'swf'    — Flash animation, use convert_swf_to_frames (Ruffle/FFDec)
+      'swf'    — Flash animation, use convert_swf_to_frames (Ruffle)
       'video'  — direct video file, use convert_mp4_to_frames (ffmpeg)
       'youtube' — YouTube video, use convert_youtube_to_frames (yt-dlp)
     """
@@ -1356,7 +1264,7 @@ def _normalize_audio_wav(path):
         result = None
         try:
             result = subprocess.run(
-                ["ffmpeg", "-y", "-i", path, "-vn",
+                [FFMPEG_PATH, "-y", "-i", path, "-vn",
                  "-acodec", "pcm_s16le", "-ar", str(ar), "-ac", str(ac), tmp],
                 capture_output=True, timeout=180)
         except Exception:
@@ -1514,7 +1422,7 @@ def convert_mp4_to_frames(mp4_path, output_base, wav_path, fps=6):
         # Step 1: Extract frames at target FPS with ffmpeg
         try:
             result = subprocess.run(
-                ["ffmpeg", "-y", "-i", mp4_path,
+                [FFMPEG_PATH, "-y", "-i", mp4_path,
                  "-vf", f"fps={fps},scale='min({PANEL_MAX_W},iw)':'min({PANEL_MAX_H},ih)':force_original_aspect_ratio=decrease,pad={PANEL_MAX_W}:{PANEL_MAX_H}:(ow-iw)/2:(oh-ih)/2",
                  frame_pattern],
                 capture_output=True, timeout=120
@@ -1563,7 +1471,7 @@ def convert_mp4_to_frames(mp4_path, output_base, wav_path, fps=6):
         # Step 4: Extract audio as WAV
         try:
             subprocess.run(
-                ["ffmpeg", "-y", "-i", mp4_path,
+                [FFMPEG_PATH, "-y", "-i", mp4_path,
                  "-vn", "-acodec", "pcm_s16le", "-ar", "44100", "-ac", "2",
                  wav_path],
                 capture_output=True, timeout=60
@@ -1584,7 +1492,7 @@ def convert_mp4_to_frames(mp4_path, output_base, wav_path, fps=6):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# SWF → FRAME SEQUENCE CONVERSION (Ruffle primary + FFDec fallback)
+# SWF → FRAME SEQUENCE CONVERSION (Ruffle)
 # ═══════════════════════════════════════════════════════════════════════════════
 
 def _frame_to_tex(img, output_base, out_idx):
@@ -1641,16 +1549,15 @@ def _convert_png_frames(frame_map, output_base, fps, log, progress,
 def _extract_swf_audio(swf_path, wav_path, log):
     """Extract audio from an SWF to a 44100Hz stereo WAV.
 
-    Order: ffmpeg direct demux (fast, handles streaming MP3) →
-    FFDec sound export (handles event/DefineSound audio).
-    Returns True if a usable WAV was produced.
+    ffmpeg demuxes the SWF sound stream directly (fast, handles
+    streaming MP3). Returns True if a usable WAV was produced.
     """
     _lg = log or (lambda m: print(f"[SWF] {m}"))
     # 1. ffmpeg demuxes the SWF sound stream directly (sub-second)
     if HAS_FFMPEG and wav_path:
         try:
             result = subprocess.run(
-                ["ffmpeg", "-y", "-i", swf_path,
+                [FFMPEG_PATH, "-y", "-i", swf_path,
                  "-vn", "-acodec", "pcm_s16le", "-ar", "44100", "-ac", "2",
                  wav_path],
                 capture_output=True, timeout=120
@@ -1662,70 +1569,12 @@ def _extract_swf_audio(swf_path, wav_path, log):
                 return True
         except (subprocess.TimeoutExpired, Exception):
             pass
-        # clean up a header-only/failed file so FFDec can retry
+        # clean up a header-only/failed file
         try:
             if os.path.isfile(wav_path):
                 os.remove(wav_path)
         except Exception:
             pass
-
-    # 2. FFDec sound export (event sounds etc.)
-    if HAS_FFDEC and wav_path:
-        import tempfile
-        sound_tmpdir = tempfile.mkdtemp(prefix="mspa3ds_swf_snd_")
-        try:
-            if FFDEC_JAR == "ffdec":
-                ffdec_cmd = ["ffdec"]
-                ffdec_cwd = None
-            else:
-                ffdec_cmd = ["java", "-Xmx2g", "-jar", FFDEC_JAR]
-                ffdec_cwd = os.path.dirname(FFDEC_JAR)
-            try:
-                subprocess.run(
-                    ffdec_cmd + [
-                        "-onerror", "ignore",
-                        "-format", "sound:wav",
-                        "-resamplewav",
-                        "-export", "sound",
-                        sound_tmpdir,
-                        swf_path
-                    ],
-                    capture_output=True, timeout=180, cwd=ffdec_cwd
-                )
-            except (subprocess.TimeoutExpired, Exception):
-                pass
-
-            # Pick the LARGEST wav (long flashes often have tiny click sounds
-            # alongside the main soundtrack)
-            wavs = []
-            for fname in os.listdir(sound_tmpdir):
-                if fname.lower().endswith(".wav"):
-                    fpath = os.path.join(sound_tmpdir, fname)
-                    wavs.append((os.path.getsize(fpath), fpath))
-            if wavs:
-                wavs.sort(reverse=True)
-                raw_wav = wavs[0][1]
-                if os.path.getsize(raw_wav) > 100 * 1024:
-                    if HAS_FFMPEG:
-                        try:
-                            subprocess.run(
-                                ["ffmpeg", "-y", "-i", raw_wav,
-                                 "-acodec", "pcm_s16le", "-ar", "44100",
-                                 "-ac", "2", wav_path],
-                                capture_output=True, timeout=120
-                            )
-                        except (subprocess.TimeoutExpired, Exception):
-                            pass
-                    else:
-                        shutil.copy2(raw_wav, wav_path)
-                    if os.path.isfile(wav_path):
-                        _lg(f"  Audio extracted via FFDec")
-                        return True
-        finally:
-            try:
-                shutil.rmtree(sound_tmpdir, ignore_errors=True)
-            except Exception:
-                pass
 
     _lg("  No audio found (silent SWF)")
     return False
@@ -1809,96 +1658,6 @@ def _run_ruffle_export(swf_path, outdir, indices, log, progress):
     return True
 
 
-def _ffdec_extract_frames_chunked(swf_path, outdir, total_frames, log, progress):
-    """FFDec fallback: chunked AVI export + ffmpeg → PNG per source frame.
-
-    A fresh JVM per chunk avoids the progressive slowdown and memory
-    accumulation that kills monolithic runs on long flashes.
-    Returns {source_index: png_path} or {} on failure.
-    """
-    _lg = log or (lambda m: print(f"[SWF] {m}"))
-    _pr = progress or (lambda p: None)
-    if not HAS_FFDEC or not HAS_FFMPEG or total_frames <= 0:
-        return {}
-
-    if FFDEC_JAR == "ffdec":
-        ffdec_cmd = ["ffdec"]
-        ffdec_cwd = None
-    else:
-        ffdec_cmd = ["java", "-Xmx2g", "-jar", FFDEC_JAR]
-        ffdec_cwd = os.path.dirname(FFDEC_JAR)
-
-    CHUNK = 750
-    start = 0
-    chunk_no = 0
-    n_chunks = (total_frames + CHUNK - 1) // CHUNK
-
-    while start < total_frames:
-        end = min(start + CHUNK - 1, total_frames - 1)
-        chunk_no += 1
-        _lg(f"  FFDec chunk {chunk_no}/{n_chunks}: frames {start}-{end}")
-        pct = 10 + int(((start / total_frames)) * 40)
-        _pr(pct)
-
-        import tempfile
-        chunkdir = tempfile.mkdtemp(prefix="mspa3ds_ffdec_")
-        try:
-            # 1. export this frame range as a PNG-codec AVI
-            timeout_s = 120 + (end - start + 1) * 2
-            try:
-                result = subprocess.run(
-                    ffdec_cmd + [
-                        "-onerror", "ignore",
-                        "-select", f"{start + 1}-{end + 1}",
-                        "-format", "frame:avi",
-                        "-export", "frame",
-                        chunkdir,
-                        swf_path
-                    ],
-                    capture_output=True, timeout=timeout_s, cwd=ffdec_cwd
-                )
-            except (subprocess.TimeoutExpired, Exception) as e:
-                _lg(f"  FFDec chunk timed out: {e}")
-                return {}
-
-            avi_path = None
-            for fname in os.listdir(chunkdir):
-                if fname.lower().endswith(".avi"):
-                    avi_path = os.path.join(chunkdir, fname)
-                    break
-            if not avi_path:
-                _lg(f"  FFDec produced no AVI for chunk {chunk_no}")
-                return {}
-
-            # 2. extract the chunk's frames with ffmpeg, numbered globally
-            try:
-                subprocess.run(
-                    ["ffmpeg", "-y", "-i", avi_path,
-                     "-vsync", "0",
-                     "-start_number", str(start),
-                     os.path.join(outdir, "f_%06d.png")],
-                    capture_output=True, timeout=600
-                )
-            except (subprocess.TimeoutExpired, Exception) as e:
-                _lg(f"  ffmpeg failed on chunk: {e}")
-                return {}
-        finally:
-            shutil.rmtree(chunkdir, ignore_errors=True)
-
-        start = end + 1
-
-    # Map source index → png path
-    frame_map = {}
-    for fname in os.listdir(outdir):
-        if fname.startswith("f_") and fname.endswith(".png"):
-            try:
-                idx = int(fname[2:8])
-                frame_map[idx] = os.path.join(outdir, fname)
-            except Exception:
-                pass
-    _pr(55)
-    return frame_map
-
 
 def convert_swf_to_frames(swf_path, output_base, wav_path, fps=6, log=None, progress=None):
     """
@@ -1912,12 +1671,6 @@ def convert_swf_to_frames(swf_path, output_base, wav_path, fps=6, log=None, prog
          disk, constant memory, --force-play bypasses preloaders)
       4. Pillow: PNG → .tex (fit + letterbox) + .anim manifest
       5. Audio: ffmpeg demuxes the SWF sound stream directly to WAV
-         (FFDec sound export as fallback)
-
-    Fallback pipeline (FFDec, for when Ruffle is unavailable):
-      Chunked -select frame-range AVI export (fresh JVM per chunk avoids the
-      memory blowup / progressive slowdown of monolithic runs on long
-      flashes) → ffmpeg → PNG → same .tex conversion.
 
     Returns (frame_count, delays_ms) or (0, []) on failure.
     """
@@ -1970,28 +1723,7 @@ def convert_swf_to_frames(swf_path, output_base, wav_path, fps=6, log=None, prog
                 frame_count, delays_ms = _convert_png_frames(
                     frame_map, output_base, fps, _log, _progress, 55, 35)
             else:
-                _log("  Ruffle export failed — falling back to FFDec")
-
-        # ── Fallback: FFDec (chunked) ──
-        if frame_count == 0 and HAS_FFDEC and HAS_FFMPEG and total_frames > 0:
-            _log(f"Step 1/3 (FFDec): chunked frame export")
-            _progress(10)
-            allpng = os.path.join(tmpdir, "ffdec_png")
-            os.makedirs(allpng, exist_ok=True)
-            fmap = _ffdec_extract_frames_chunked(
-                swf_path, allpng, total_frames, _log, _progress)
-            if fmap:
-                # decimate the full-rate frames to the target fps
-                frame_map = [(i, fmap[i]) for i in indices if i in fmap]
-                if len(frame_map) < 2:
-                    # indices computed for a different frame set — take evenly
-                    avail = sorted(fmap.keys())
-                    step = max(1, len(avail) // max(1, expected_out))
-                    frame_map = [(i, fmap[i]) for i in avail[::step]]
-                _log(f"Step 2/3: Converting {len(frame_map)} PNGs → .tex")
-                _progress(55)
-                frame_count, delays_ms = _convert_png_frames(
-                    frame_map, output_base, fps, _log, _progress, 55, 35)
+                _log("  Ruffle export failed")
 
         if frame_count == 0:
             _log("All conversion methods failed")
@@ -2202,7 +1934,7 @@ def convert_youtube_to_frames(video_id, output_base, wav_path, fps=6, log=None, 
         
         try:
             result = subprocess.run(
-                ["ffmpeg", "-y", "-i", mp4_path,
+                [FFMPEG_PATH, "-y", "-i", mp4_path,
                  "-vf", f"fps={fps},scale='min({PANEL_MAX_W},iw)':'min({PANEL_MAX_H},ih)':force_original_aspect_ratio=decrease,pad={PANEL_MAX_W}:{PANEL_MAX_H}:(ow-iw)/2:(oh-ih)/2",
                  frame_pattern],
                 capture_output=True, timeout=600
@@ -2267,7 +1999,7 @@ def convert_youtube_to_frames(video_id, output_base, wav_path, fps=6, log=None, 
         if wav_path:
             try:
                 subprocess.run(
-                    ["ffmpeg", "-y", "-i", mp4_path,
+                    [FFMPEG_PATH, "-y", "-i", mp4_path,
                      "-vn", "-acodec", "pcm_s16le", "-ar", "44100", "-ac", "2",
                      wav_path],
                     capture_output=True, timeout=60
@@ -2432,7 +2164,7 @@ class ScraperEngine:
                 if n_media == 1:
                     ext = _get_ext(parsed["media_urls"][0]) or ".gif"
                     if parsed["is_flash"]:
-                        # Use .swf for SWF URLs (FFDec conversion), .mp4 for MP4 URLs (ffmpeg)
+                        # Use .swf for SWF URLs (ruffle conversion), .mp4 for MP4 URLs (ffmpeg)
                         if ext.lower() != ".swf":
                             ext = ".mp4"  # filegarden MP4 fallback
                     local_path = f"media/{global_page:06d}_0{ext}"
@@ -2554,8 +2286,8 @@ class ScraperEngine:
                 frame_count = 0
                 if downloaded_ok:
                     downloaded += 1
-                    if is_swf and (HAS_RUFFLE or HAS_FFDEC):
-                        # SWF → Ruffle (primary) / FFDec (fallback) → frames
+                    if is_swf and HAS_RUFFLE:
+                        # SWF → Ruffle → frames
                         self._post(f"Converting SWF: {os.path.basename(fs_path)}", None, "convert")
                         frame_count, delays = convert_swf_to_frames(
                             fs_path, output_base, wav_path, fps=6,
@@ -3007,8 +2739,7 @@ class MspfaScraperEngine:
 
                     # Route by CONTENT, not by URL extension — some flash
                     # URLs are extensionless and some "video" URLs are SWFs
-                    if item.get("is_flash") and _file_is_swf(fs_path) and \
-                            (HAS_RUFFLE or HAS_FFDEC):
+                    if item.get("is_flash") and _file_is_swf(fs_path) and HAS_RUFFLE:
                         self._post(f"Converting SWF: {os.path.basename(fs_path)}", None, "convert")
                         frame_count, delays = convert_swf_to_frames(
                             fs_path, output_base, wav_path, fps=6,
@@ -3274,7 +3005,6 @@ class MspaBuilderApp:
 
         ffmpeg_status = "\u2705" if HAS_FFMPEG else "\u274C"
         ruffle_status = "\u2705" if HAS_RUFFLE else "\u274C"
-        ffdec_status = "\u2705" if HAS_FFDEC else "\u274C"
         ytdlp_status = "\u2705" if HAS_YT_DLP else "\u274C"
         yt_version = _yt_dlp_version() if HAS_YT_DLP else ""
         yt_label = f"yt-dlp {ytdlp_status}" if not yt_version else f"yt-dlp {yt_version} {ytdlp_status}"
@@ -3283,7 +3013,6 @@ class MspaBuilderApp:
         tools_row.pack(fill=tk.X)
         ttk.Label(tools_row, text=f"Ruffle {ruffle_status}", font=("Segoe UI", 8)).pack(side=tk.LEFT, padx=(0, 6))
         ttk.Label(tools_row, text=f"ffmpeg {ffmpeg_status}", font=("Segoe UI", 8)).pack(side=tk.LEFT, padx=(0, 6))
-        ttk.Label(tools_row, text=f"FFDec {ffdec_status}", font=("Segoe UI", 8)).pack(side=tk.LEFT, padx=(0, 6))
         ttk.Label(tools_row, text=yt_label, font=("Segoe UI", 8)).pack(side=tk.LEFT)
 
         if not HAS_YT_DLP:
@@ -3298,10 +3027,8 @@ class MspaBuilderApp:
                       font=("Segoe UI", 7), foreground="#b45309").pack(anchor=tk.W, pady=(2, 0))
 
         if not HAS_RUFFLE:
-            ruffle_hint = ("Ruffle renders flashes \u224850x faster than FFDec. " +
-                           ("Set RUFFLE_AUTO_BUILD=1 to build it with cargo."
-                            if HAS_FFDEC else
-                            "Set RUFFLE_AUTO_BUILD=1 (needs Rust from rustup.rs) to build it."))
+            ruffle_hint = ("Ruffle is the SWF renderer. "
+                           "Set RUFFLE_AUTO_BUILD=1 (needs Rust from rustup.rs) to build it.")
             ttk.Label(tools_frame, text=ruffle_hint,
                       font=("Segoe UI", 7), wraplength=240).pack(anchor=tk.W, pady=(2, 0))
 
